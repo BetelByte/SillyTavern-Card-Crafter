@@ -181,10 +181,8 @@
 }
 
 .card-crafter-body {
-    overflow: auto;
+    overflow: visible;
     padding: 12px var(--cc-pad) 8px;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
 }
 
 .card-crafter-footer {
@@ -248,6 +246,12 @@
     color: var(--cc-muted);
     font-style: normal;
     font-weight: 400;
+}
+
+.card-crafter-library {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .card-crafter-field textarea,
@@ -494,13 +498,25 @@
 }
 
 .popup:has(#card-crafter-root) {
-    width: min(760px, calc(100dvw - 1rem));
+    width: min(760px, calc(100dvw - 0.5rem));
+    max-height: calc(100dvh - 0.5rem);
     text-align: start;
+    overflow: hidden;
+}
+
+.popup:has(#card-crafter-root) .popup-body {
+    overflow: hidden;
+    max-height: calc(100dvh - 0.75rem);
 }
 
 .popup:has(#card-crafter-root) .popup-content {
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 0;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    scrollbar-width: thin;
 }
 
 #card-crafter-root.card-crafter-popup {

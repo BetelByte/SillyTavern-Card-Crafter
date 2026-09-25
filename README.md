@@ -47,7 +47,7 @@ You need a working model selected in SillyTavern. If you use **Connection Manage
 
 ### Analyze
 
-Upload a `.png` character card or `.json`. The meter is 0–100:
+Pick a character already in your SillyTavern library, or upload a `.png` / `.json` card. The meter is 0–100:
 
 | Score | Band |
 | --- | --- |
@@ -61,7 +61,7 @@ Optional: turn on **Blend in an extra AI judge** in settings. That spends tokens
 
 ### Remake
 
-Upload the bad card, say what to keep or cut, set creativity, and remake. Import the new character and lorebook when you like it.
+Select the character from your library (or upload a card), say what to keep or cut, set creativity, and remake. Import the new character and lorebook when you like it.
 
 ## Settings
 

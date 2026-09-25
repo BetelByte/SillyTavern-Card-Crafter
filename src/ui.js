@@ -17,6 +17,12 @@ import {
     toLorebookPayload,
     toPersonaPayload,
 } from './importers.js';
+import {
+    characterOptionLabel,
+    getCurrentCharacterRef,
+    listLibraryCharacters,
+    loadLibraryCharacter,
+} from './characters.js';
 import { getConnectionProfiles, getSettings, updateSetting } from './settings.js';
 import { analyzeSlop, flattenCardForPrompt, normalizeCard } from './slop.js';
 import {
@@ -41,6 +47,7 @@ const state = {
     lastKind: null,
     uploadedCard: null,
     uploadedName: '',
+    selectedAvatar: '',
     analysis: null,
     remakeResult: null,
     popup: null,
@@ -233,11 +240,12 @@ function renderGenerate() {
 function renderAnalyze() {
     return `
     <div class="card-crafter-form">
-      <p class="card-crafter-lead">Upload a PNG character card or a JSON dump. The slop-o-meter scores formatting, completeness, cliches, and filler. Higher is sloppier.</p>
+      <p class="card-crafter-lead">Pick a character already in SillyTavern, or upload a PNG / JSON card. The slop-o-meter scores formatting, completeness, cliches, and filler. Higher is sloppier.</p>
+      ${renderLibraryPicker('cc-library')}
       <label class="card-crafter-drop" id="cc-drop">
         <input type="file" id="cc-file" accept=".png,.json,application/json,image/png">
         <i class="fa-solid fa-file-arrow-up"></i>
-        <strong>${state.uploadedName || 'Drop a card here'}</strong>
+        <strong>${state.uploadedName || 'Or drop a card here'}</strong>
         <span>PNG tavern card or JSON</span>
       </label>
       <label class="card-crafter-field">
@@ -255,16 +263,45 @@ function renderAnalyze() {
   `;
 }
 
+function renderLibraryPicker(id) {
+    const characters = listLibraryCharacters();
+    const current = getCurrentCharacterRef();
+    const selected = state.selectedAvatar || current?.avatar || '';
+    if (!characters.length) {
+        return `<p class="card-crafter-muted">No characters in your SillyTavern library yet.</p>`;
+    }
+    return `
+      <label class="card-crafter-field">
+        <span>Character already in SillyTavern</span>
+        <div class="card-crafter-library">
+          <select id="${id}" class="cc-library-select">
+            <option value="">Select a loaded character…</option>
+            ${characters.map((item) => `
+              <option value="${escapeHtml(item.avatar)}" ${item.avatar === selected ? 'selected' : ''}>
+                ${escapeHtml(characterOptionLabel(item, current?.avatar))}
+              </option>
+            `).join('')}
+          </select>
+          <button type="button" class="card-crafter-secondary cc-library-load" data-select="${id}">
+            <i class="fa-solid fa-folder-open"></i><span>Use this card</span>
+          </button>
+        </div>
+        <small>No export needed. This reads the card already sitting in your character list.</small>
+      </label>
+    `;
+}
+
 function renderRemake() {
     const settings = getSettings();
     const ready = Boolean(state.uploadedCard);
     return `
     <div class="card-crafter-form">
-      <p class="card-crafter-lead">Remake the uploaded card with a cleaner format, optional lorebook, and your creativity slider. Analyze a card first, or upload one here.</p>
+      <p class="card-crafter-lead">Pick a character already in SillyTavern and remake it. Keep the soul, clean the slop, optionally build a lorebook.</p>
+      ${renderLibraryPicker('cc-remake-library')}
       <label class="card-crafter-drop" id="cc-remake-drop">
         <input type="file" id="cc-remake-file" accept=".png,.json,application/json,image/png">
         <i class="fa-solid fa-recycle"></i>
-        <strong>${state.uploadedName || 'Upload the sloppy card'}</strong>
+        <strong>${state.uploadedName || 'Or upload a sloppy card'}</strong>
         <span>${ready ? 'Ready to remake' : 'PNG or JSON'}</span>
       </label>
       <label class="card-crafter-field">
@@ -643,7 +680,49 @@ function bindGenerate(root) {
     });
 }
 
+function bindLibraryPicker(root) {
+    root.querySelectorAll('.cc-library-load').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const select = root.querySelector(`#${button.dataset.select}`);
+            const avatar = select?.value;
+            if (!avatar) {
+                toast('warning', 'Pick a character from your library first.');
+                return;
+            }
+            try {
+                setBusy(button, true, 'Loading…');
+                await ingestLibraryCard(avatar, root);
+            } finally {
+                setBusy(button, false);
+            }
+        });
+    });
+    root.querySelectorAll('.cc-library-select').forEach((select) => {
+        select.addEventListener('change', async () => {
+            if (!select.value) return;
+            await ingestLibraryCard(select.value, root);
+        });
+    });
+}
+
+async function ingestLibraryCard(avatar, root) {
+    try {
+        const card = await loadLibraryCharacter(avatar);
+        state.uploadedCard = card;
+        state.uploadedName = card.name || 'Library card';
+        state.selectedAvatar = avatar;
+        const drop = root.querySelector('.card-crafter-drop strong');
+        if (drop) drop.textContent = state.uploadedName;
+        const remakeBtn = root.querySelector('#cc-remake-btn');
+        if (remakeBtn) remakeBtn.disabled = false;
+        toast('info', `Loaded ${state.uploadedName} from your library.`);
+    } catch (error) {
+        toast('error', error.message || String(error));
+    }
+}
+
 function bindAnalyze(root) {
+    bindLibraryPicker(root);
     root.querySelector('#cc-file')?.addEventListener('change', async (event) => {
         const file = event.target.files?.[0];
         if (file) await ingestCard(file, root);
@@ -683,6 +762,7 @@ function bindAnalyze(root) {
 }
 
 function bindRemake(root) {
+    bindLibraryPicker(root);
     const slider = root.querySelector('#cc-remake-creativity');
     const label = root.querySelector('#cc-remake-creativity-label');
     slider?.addEventListener('input', () => {
@@ -757,7 +837,10 @@ async function ingestCard(file, root) {
         }
         state.uploadedCard = card;
         state.uploadedName = card.name || file.name;
+        state.selectedAvatar = '';
         const drop = root.querySelector('.card-crafter-drop strong');
+        const remakeBtn = root.querySelector('#cc-remake-btn');
+        if (remakeBtn) remakeBtn.disabled = false;
         if (drop) drop.textContent = state.uploadedName;
         toast('info', `Loaded ${state.uploadedName}`);
     } catch (error) {
