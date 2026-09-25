@@ -1,0 +1,539 @@
+:root {
+    --cc-bg: color-mix(in srgb, var(--SmartThemeBlurTintColor, #16141f) 92%, #000 8%);
+    --cc-panel: color-mix(in srgb, var(--SmartThemeBotMesBlurTintColor, #1d1a28) 88%, #000 12%);
+    --cc-ink: var(--SmartThemeBodyColor, #f4efe6);
+    --cc-muted: color-mix(in srgb, var(--SmartThemeBodyColor, #f4efe6) 62%, transparent);
+    --cc-line: color-mix(in srgb, var(--SmartThemeBorderColor, #5a4d72) 70%, transparent);
+    --cc-accent: var(--SmartThemeQuoteColor, #e8b86d);
+    --cc-danger: #e07a6a;
+    --cc-ok: #7dbe8a;
+    --cc-warn: #e0b35a;
+    --cc-radius: 18px;
+    --cc-pad: clamp(12px, 3.4vw, 22px);
+    --cc-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+}
+
+.card-crafter-noscroll {
+    overflow: hidden;
+}
+
+.card-crafter-root {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.card-crafter-root.is-open {
+    pointer-events: auto;
+}
+
+.card-crafter-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 52%);
+}
+
+.card-crafter-panel {
+    position: relative;
+    z-index: 1;
+    width: min(760px, 100vw);
+    max-height: min(94dvh, 980px);
+    display: flex;
+    flex-direction: column;
+    background: var(--cc-bg);
+    color: var(--cc-ink);
+    border: 1px solid var(--cc-line);
+    border-bottom: 0;
+    border-radius: var(--cc-radius) var(--cc-radius) 0 0;
+    box-shadow: var(--cc-shadow);
+    font-family: var(--mainFontFamily, inherit);
+    font-size: var(--mainFontSize, 16px);
+    animation: cc-rise 180ms ease-out;
+}
+
+@keyframes cc-rise {
+    from { transform: translateY(18px); opacity: 0.4; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.card-crafter-header,
+.card-crafter-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: var(--cc-pad);
+}
+
+.card-crafter-header {
+    padding-bottom: 8px;
+}
+
+.card-crafter-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.card-crafter-heading h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1.2;
+}
+
+.card-crafter-heading p,
+.card-crafter-muted,
+.card-crafter-lead,
+.card-crafter-footer {
+    color: var(--cc-muted);
+}
+
+.card-crafter-heading p {
+    margin: 2px 0 0;
+    font-size: 0.86rem;
+}
+
+.card-crafter-mark {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--cc-accent) 18%, transparent);
+    color: var(--cc-accent);
+    flex: 0 0 auto;
+}
+
+.card-crafter-icon-btn,
+.card-crafter-primary,
+.card-crafter-secondary,
+.card-crafter-ghost {
+    border: 1px solid var(--cc-line);
+    background: transparent;
+    color: inherit;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+}
+
+.card-crafter-icon-btn {
+    width: 44px;
+    padding: 0;
+}
+
+.card-crafter-primary {
+    background: var(--cc-accent);
+    color: #1a1410;
+    border-color: transparent;
+    font-weight: 650;
+}
+
+.card-crafter-secondary {
+    background: color-mix(in srgb, var(--cc-accent) 16%, transparent);
+}
+
+.card-crafter-icon-btn:hover,
+.card-crafter-ghost:hover,
+.card-crafter-secondary:hover {
+    border-color: var(--cc-accent);
+}
+
+.card-crafter-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    padding: 0 var(--cc-pad);
+}
+
+.card-crafter-tab {
+    min-height: 48px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--cc-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.card-crafter-tab i {
+    font-size: 1rem;
+}
+
+.card-crafter-tab.is-active {
+    color: var(--cc-ink);
+    background: color-mix(in srgb, var(--cc-accent) 14%, transparent);
+    border-color: color-mix(in srgb, var(--cc-accent) 45%, transparent);
+}
+
+.card-crafter-body {
+    overflow: auto;
+    padding: 12px var(--cc-pad) 8px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.card-crafter-footer {
+    padding-top: 8px;
+    font-size: 0.75rem;
+}
+
+.card-crafter-form,
+.card-crafter-result {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.card-crafter-type-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+.card-crafter-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 14px;
+    border: 1px solid var(--cc-line);
+    border-radius: 16px;
+    background: var(--cc-panel);
+}
+
+.card-crafter-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.card-crafter-chip.is-active {
+    border-color: var(--cc-accent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc-accent) 50%, transparent);
+}
+
+.card-crafter-chip span {
+    color: var(--cc-muted);
+    font-size: 0.82rem;
+}
+
+.card-crafter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.card-crafter-field span {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.card-crafter-field em,
+.card-crafter-field small {
+    color: var(--cc-muted);
+    font-style: normal;
+    font-weight: 400;
+}
+
+.card-crafter-field textarea,
+.card-crafter-field input[type="text"],
+.card-crafter-field input[type="number"],
+.card-crafter-field select {
+    width: 100%;
+    border: 1px solid var(--cc-line);
+    border-radius: 14px;
+    background: var(--cc-panel);
+    color: inherit;
+    padding: 12px 14px;
+    font: inherit;
+    resize: vertical;
+}
+
+.card-crafter-field textarea:focus,
+.card-crafter-field input:focus,
+.card-crafter-field select:focus {
+    outline: 2px solid color-mix(in srgb, var(--cc-accent) 70%, transparent);
+    outline-offset: 1px;
+}
+
+.card-crafter-field input[type="range"] {
+    width: 100%;
+    accent-color: var(--cc-accent);
+    min-height: 32px;
+}
+
+.card-crafter-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.35;
+}
+
+.card-crafter-check input {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    accent-color: var(--cc-accent);
+}
+
+.card-crafter-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.card-crafter-actions.wrap,
+.card-crafter-actions {
+    flex-wrap: wrap;
+}
+
+.card-crafter-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 120px;
+    border: 1.5px dashed var(--cc-line);
+    border-radius: 18px;
+    background: var(--cc-panel);
+    text-align: center;
+    padding: 18px;
+    cursor: pointer;
+}
+
+.card-crafter-drop input {
+    display: none;
+}
+
+.card-crafter-drop i {
+    font-size: 1.4rem;
+    color: var(--cc-accent);
+}
+
+.card-crafter-result {
+    margin-top: 8px;
+    padding: 14px;
+    border: 1px solid var(--cc-line);
+    border-radius: 18px;
+    background: var(--cc-panel);
+}
+
+.card-crafter-result-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.card-crafter-result-head h3 {
+    margin: 0 0 4px;
+}
+
+.card-crafter-result-head p {
+    margin: 0;
+    color: var(--cc-muted);
+}
+
+.card-crafter-meter {
+    min-width: 72px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    text-align: center;
+    background: color-mix(in srgb, var(--cc-warn) 18%, transparent);
+}
+
+.card-crafter-meter-score {
+    display: block;
+    font-size: 1.4rem;
+    font-weight: 750;
+    line-height: 1;
+}
+
+.card-crafter-meter-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.card-crafter-meter.band-clean { background: color-mix(in srgb, var(--cc-ok) 22%, transparent); }
+.card-crafter-meter.band-okay { background: color-mix(in srgb, var(--cc-ok) 14%, #e0b35a 10%); }
+.card-crafter-meter.band-sloppy { background: color-mix(in srgb, var(--cc-warn) 24%, transparent); }
+.card-crafter-meter.band-slop,
+.card-crafter-meter.band-toxic { background: color-mix(in srgb, var(--cc-danger) 24%, transparent); }
+
+.card-crafter-preview {
+    border-top: 1px solid var(--cc-line);
+    padding-top: 8px;
+}
+
+.card-crafter-preview summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+
+.card-crafter-preview p,
+.card-crafter-entry-list p {
+    white-space: pre-wrap;
+    margin: 8px 0 0;
+}
+
+.card-crafter-entry-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.card-crafter-entry-list li {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--cc-bg) 70%, transparent);
+}
+
+.card-crafter-entry-list span {
+    display: block;
+    color: var(--cc-muted);
+    font-size: 0.8rem;
+}
+
+.card-crafter-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.card-crafter-bar {
+    display: grid;
+    grid-template-columns: 96px 1fr 32px;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.82rem;
+}
+
+.card-crafter-bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cc-ink) 10%, transparent);
+    overflow: hidden;
+}
+
+.card-crafter-bar-track i {
+    display: block;
+    height: 100%;
+    background: var(--cc-accent);
+}
+
+.card-crafter-issues {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.card-crafter-issues li {
+    padding: 10px 12px;
+    border-left: 3px solid var(--cc-warn);
+    background: color-mix(in srgb, var(--cc-bg) 80%, transparent);
+    border-radius: 0 12px 12px 0;
+}
+
+.card-crafter-issues li.sev-critical { border-left-color: var(--cc-danger); }
+.card-crafter-issues li.sev-high { border-left-color: var(--cc-danger); }
+.card-crafter-issues li.sev-low { border-left-color: var(--cc-ok); }
+
+.card-crafter-issues strong {
+    display: block;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    color: var(--cc-muted);
+}
+
+.card-crafter-issues em {
+    display: block;
+    margin-top: 4px;
+    font-style: normal;
+    color: var(--cc-muted);
+}
+
+.card-crafter-recs p {
+    margin: 0;
+}
+
+.card-crafter-launch-floating {
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 50;
+}
+
+.card-crafter-settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 6px 0 10px;
+}
+
+@media (min-width: 720px) {
+    .card-crafter-root {
+        align-items: center;
+        padding: 24px;
+    }
+
+    .card-crafter-panel {
+        border-radius: var(--cc-radius);
+        border-bottom: 1px solid var(--cc-line);
+        max-height: min(88dvh, 920px);
+    }
+
+    .card-crafter-type-row {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .card-crafter-tab {
+        flex-direction: row;
+        gap: 8px;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 419px) {
+    .card-crafter-tab span {
+        font-size: 0.66rem;
+    }
+
+    .card-crafter-bar {
+        grid-template-columns: 74px 1fr 28px;
+    }
+
+    .card-crafter-primary,
+    .card-crafter-secondary,
+    .card-crafter-ghost {
+        width: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .card-crafter-panel {
+        animation: none;
+    }
+}
