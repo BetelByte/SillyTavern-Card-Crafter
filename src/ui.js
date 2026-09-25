@@ -43,41 +43,91 @@ const state = {
     uploadedName: '',
     analysis: null,
     remakeResult: null,
+    popup: null,
+    opening: false,
 };
 
-export function openCardCrafter() {
-    const existing = document.getElementById('card-crafter-root');
-    if (existing) {
-        existing.classList.add('is-open');
-        document.body.classList.add('card-crafter-noscroll');
-        const firstField = existing.querySelector('textarea, input, button');
-        firstField?.focus();
-        return;
-    }
+export function openCardCrafter(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (state.opening || state.popup) return;
+    if (document.getElementById('card-crafter-root')) return;
+
+    state.opening = true;
+    // Wait out the originating tap so it cannot immediately dismiss the dialog.
+    window.setTimeout(() => {
+        try {
+            openWithPopup();
+        } catch (error) {
+            state.opening = false;
+            console.error('[Card Crafter] Failed to open panel', error);
+            toast('error', error.message || 'Could not open Card Crafter.');
+        }
+    }, 30);
+}
+
+function openWithPopup() {
+    const ctx = SillyTavern.getContext();
     const root = document.createElement('div');
     root.id = 'card-crafter-root';
-    root.className = 'card-crafter-root is-open';
+    root.className = 'card-crafter-popup';
     root.innerHTML = renderShell();
-    document.body.appendChild(root);
-    document.body.classList.add('card-crafter-noscroll');
     bindShell(root);
     renderTab(root);
+
+    if (ctx?.Popup && ctx.POPUP_TYPE) {
+        const popup = new ctx.Popup(root, ctx.POPUP_TYPE.DISPLAY, '', {
+            large: true,
+            wide: true,
+            allowVerticalScrolling: true,
+            leftAlign: true,
+            animation: 'fast',
+            onClose: () => {
+                state.popup = null;
+                state.opening = false;
+            },
+        });
+        state.popup = popup;
+        popup.show().catch((error) => {
+            state.popup = null;
+            state.opening = false;
+            console.error('[Card Crafter] Popup failed', error);
+            toast('error', error.message || 'Could not open Card Crafter.');
+        });
+        return;
+    }
+
+    openFallback(root);
+    state.opening = false;
+}
+
+function openFallback(root) {
+    root.classList.add('card-crafter-root', 'is-open');
+    const host = document.body;
+    host.appendChild(root);
+    bindShell(root);
+    renderTab(root);
+    document.addEventListener('keydown', onEscape);
 }
 
 export function closeCardCrafter() {
+    if (state.popup) {
+        state.popup.completeCancelled?.() || state.popup.dlg?.close?.();
+        state.popup = null;
+        state.opening = false;
+        return;
+    }
     const root = document.getElementById('card-crafter-root');
     if (!root) return;
     document.removeEventListener('keydown', onEscape);
     root.classList.remove('is-open');
-    document.body.classList.remove('card-crafter-noscroll');
-    setTimeout(() => root.remove(), 180);
+    root.remove();
 }
 
 function renderShell() {
     const settings = getSettings();
     return `
-    <div class="card-crafter-backdrop" data-cc-close></div>
-    <section class="card-crafter-panel" role="dialog" aria-modal="true" aria-labelledby="cc-title">
+    <section class="card-crafter-panel" role="dialog" aria-label="Card Crafter">
       <header class="card-crafter-header">
         <div class="card-crafter-heading">
           <div class="card-crafter-mark" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></div>

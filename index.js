@@ -9,7 +9,26 @@ function importCheck() {
     return Boolean(globalContext && typeof globalContext.renderExtensionTemplateAsync === 'function');
 }
 
+function bindOpen(el) {
+    if (!el || el.dataset.ccBound === '1') return;
+    el.dataset.ccBound = '1';
+    const handler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        openCardCrafter(event);
+    };
+    el.addEventListener('click', handler);
+    el.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openCardCrafter(event);
+        }
+    });
+}
+
 function addToolbarButton() {
+    addWandMenuItem();
     if (document.querySelector('.card-crafter-launch')) return;
 
     const button = document.createElement('div');
@@ -17,20 +36,13 @@ function addToolbarButton() {
     button.title = 'Card Crafter';
     button.setAttribute('tabindex', '0');
     button.setAttribute('role', 'button');
-    button.addEventListener('click', openCardCrafter);
-    button.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openCardCrafter();
-        }
-    });
+    bindOpen(button);
 
     const targets = [
+        document.querySelector('#extensionsMenu'),
         document.querySelector('#rm_buttons_container'),
         document.querySelector('.form_create_bottom_buttons_block'),
         document.querySelector('#form_character_search_form'),
-        document.querySelector('#top-settings-holder'),
-        document.querySelector('#left-nav-panel'),
     ];
 
     const host = targets.find(Boolean);
@@ -40,6 +52,18 @@ function addToolbarButton() {
         document.body.appendChild(button);
         button.classList.add('card-crafter-launch-floating');
     }
+}
+
+function addWandMenuItem() {
+    const menu = document.querySelector('#extensionsMenu');
+    if (!menu || menu.querySelector('.card-crafter-wand-item')) return;
+    const item = document.createElement('div');
+    item.className = 'list-group-item flex-container flexGap5 interactable card-crafter-wand-item';
+    item.title = 'Open Card Crafter';
+    item.tabIndex = 0;
+    item.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>Card Crafter</span>';
+    bindOpen(item);
+    menu.prepend(item);
 }
 
 async function addSettingsDrawer() {
@@ -69,7 +93,7 @@ async function addSettingsDrawer() {
         `);
     }
 
-    container.querySelector('.card-crafter-open-settings-btn')?.addEventListener('click', openCardCrafter);
+    bindOpen(container.querySelector('.card-crafter-open-settings-btn'));
 }
 
 function registerSlashCommand() {

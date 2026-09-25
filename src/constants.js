@@ -1,6 +1,6 @@
 export const EXTENSION_NAME = 'SillyTavern-Card-Crafter';
 export const MODULE_NAME = 'cardCrafter';
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 export const DISPLAY_NAME = 'Card Crafter';
 
 export const TABS = [
