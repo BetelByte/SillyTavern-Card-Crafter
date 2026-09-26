@@ -61,7 +61,7 @@ Analyze is AI-only. It uses tokens and waits on the model. There is no local heu
 
 ### Remake
 
-Select the character from your library (or upload a card), say what to keep or cut, set creativity, and remake. Import the new character and lorebook when you like it.
+Select the character from your library (or upload a card), say what to keep or cut, set creativity, and remake. If you already ran Analyze, that critique is applied automatically. Use **Extra changes** for anything else you want rewritten; your notes win if they conflict with the judge. Import the new character and lorebook when you like it.
 
 ## Settings
 

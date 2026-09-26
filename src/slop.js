@@ -124,3 +124,26 @@ export function normalizeAiJudgement(raw, { threshold = 55 } = {}) {
         source: 'ai',
     };
 }
+
+export function formatAnalysisBrief(analysis) {
+    if (!analysis) return '';
+    const lines = [];
+    if (Number.isFinite(Number(analysis.score))) {
+        lines.push(`Slop score: ${analysis.score}/100${analysis.isSlop ? ' (flagged as slop)' : ''}.`);
+    }
+    if (analysis.aiSummary) lines.push(`Verdict: ${analysis.aiSummary}`);
+    if (analysis.issues?.length) {
+        lines.push('Issues to fix:');
+        for (const issue of analysis.issues.slice(0, 10)) {
+            const bits = [issue.type, issue.description, issue.suggestion].filter(Boolean);
+            lines.push(`- ${bits.join(' — ')}`);
+        }
+    }
+    if (analysis.recommendations?.length) {
+        lines.push('Recommended rewrites:');
+        for (const rec of analysis.recommendations.slice(0, 6)) {
+            lines.push(`- ${rec}`);
+        }
+    }
+    return lines.join('\n');
+}

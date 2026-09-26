@@ -9,6 +9,27 @@ import {
 } from './prompts.js';
 
 const JSON_SYSTEM_PROMPT = 'Return only valid JSON. No markdown fences. No commentary. No reasoning tags.';
+const MACRO_OPEN = '%%{';
+const MACRO_CLOSE = '}%%';
+
+function neutralizeStMacros(text) {
+    return String(text ?? '').replace(/\{\{([^{}]+)\}\}/g, `${MACRO_OPEN}$1${MACRO_CLOSE}`);
+}
+
+function restoreStMacros(value) {
+    if (typeof value === 'string') {
+        return value.replace(/%%\{([^{}]+)\}%%/g, '{{$1}}');
+    }
+    if (Array.isArray(value)) return value.map(restoreStMacros);
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [key, item] of Object.entries(value)) {
+            out[key] = restoreStMacros(item);
+        }
+        return out;
+    }
+    return value;
+}
 
 export function creativityToTemperature(level) {
     const n = Number(level);
@@ -70,8 +91,8 @@ async function requestViaProfile({ prompt, systemPrompt, tokens, temperature }) 
     }
 
     const messages = [
-        { role: 'system', content: systemPrompt || JSON_SYSTEM_PROMPT },
-        { role: 'user', content: prompt },
+        { role: 'system', content: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT) },
+        { role: 'user', content: neutralizeStMacros(prompt) },
     ];
 
     const result = await ctx.ConnectionManagerRequestService.sendRequest(
@@ -93,8 +114,8 @@ async function requestViaGenerateRaw({ prompt, systemPrompt, tokens }) {
     // Do not pass jsonSchema. ST only extracts schema JSON for OpenAI-style
     // chat completion; every other backend comes back as "{}".
     const raw = await ctx.generateRaw({
-        prompt,
-        systemPrompt: systemPrompt || JSON_SYSTEM_PROMPT,
+        prompt: neutralizeStMacros(prompt),
+        systemPrompt: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT),
         instructOverride: true,
         quietToLoud: false,
         responseLength: tokens,
@@ -141,7 +162,7 @@ function parseJsonPayload(text) {
     if (!parsed || (typeof parsed === 'object' && !Array.isArray(parsed) && !Object.keys(parsed).length)) {
         throw new Error('Model returned empty JSON.');
     }
-    return parsed;
+    return restoreStMacros(parsed);
 }
 
 export async function generateJson({ prompt, systemPrompt, creativity, maxTokens }) {
@@ -176,11 +197,20 @@ export function generatePersona(options) {
     });
 }
 
-export function remakeCharacter(options) {
-    return generateJson({
+export async function remakeCharacter(options) {
+    const settings = getSettings();
+    const tokens = Math.max(Number(settings.maxResponseTokens) || 0, 4000);
+    const result = await generateJson({
         prompt: buildRemakePrompt(options),
         creativity: options.creativity,
+        maxTokens: tokens,
     });
+    const name = String(result?.name || '').trim();
+    const description = String(result?.description || '').trim();
+    if (!name || !description) {
+        throw new Error('Remake came back without a usable name/description. The model probably ran out of tokens — try again with lorebook off, or raise max response tokens.');
+    }
+    return result;
 }
 
 export function gradeCardWithAi(cardText) {

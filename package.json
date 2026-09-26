@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-card-crafter",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "SillyTavern extension for AI-powered character card, lorebook, and persona generation with slop detection",
   "type": "module",

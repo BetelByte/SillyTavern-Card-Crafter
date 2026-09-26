@@ -86,7 +86,72 @@ export function extractJsonObject(text) {
         }
     }
 
-    throw new Error('Model response contained incomplete JSON.');
+    return salvageJsonObject(candidate);
+}
+
+/**
+ * Close a truncated JSON object/array well enough to recover finished fields.
+ * Used when the model hits the token cap mid-lorebook.
+ */
+export function salvageJsonObject(text) {
+    const raw = String(text || '');
+    const start = Math.min(
+        ...['{', '['].map((ch) => {
+            const index = raw.indexOf(ch);
+            return index < 0 ? Number.POSITIVE_INFINITY : index;
+        }),
+    );
+    if (!Number.isFinite(start)) {
+        throw new Error('Could not find JSON in the model response.');
+    }
+
+    let slice = raw.slice(start);
+    let inString = false;
+    let escaped = false;
+    for (const ch of slice) {
+        if (!inString) {
+            if (ch === '"') inString = true;
+            continue;
+        }
+        if (escaped) {
+            escaped = false;
+        } else if (ch === '\\') {
+            escaped = true;
+        } else if (ch === '"') {
+            inString = false;
+        }
+    }
+    if (inString) slice += '"';
+
+    slice = slice.replace(/,\s*$/, '');
+
+    let braces = 0;
+    let brackets = 0;
+    inString = false;
+    escaped = false;
+    for (const ch of slice) {
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === '\\') escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
+        }
+        if (ch === '"') inString = true;
+        else if (ch === '{') braces += 1;
+        else if (ch === '}') braces -= 1;
+        else if (ch === '[') brackets += 1;
+        else if (ch === ']') brackets -= 1;
+    }
+    if (braces < 0 || brackets < 0) {
+        throw new Error('Model response contained broken JSON.');
+    }
+    slice += ']'.repeat(brackets) + '}'.repeat(braces);
+
+    try {
+        return JSON.parse(slice);
+    } catch (_) {
+        throw new Error('Model response contained incomplete JSON.');
+    }
 }
 
 export function downloadTextFile(filename, content, mime = 'application/json') {

@@ -25,7 +25,7 @@ import {
     loadLibraryCharacter,
 } from './characters.js';
 import { getConnectionProfiles, getSettings, updateSetting } from './settings.js';
-import { flattenCardForPrompt, normalizeAiJudgement, normalizeCard } from './slop.js';
+import { flattenCardForPrompt, formatAnalysisBrief, normalizeAiJudgement, normalizeCard } from './slop.js';
 import {
     creativityLabel,
     downloadTextFile,
@@ -50,6 +50,8 @@ const state = {
     selectedAvatar: '',
     analysis: null,
     remakeResult: null,
+    remakeExtra: '',
+    remakeIncludeLore: true,
     popup: null,
     opening: false,
 };
@@ -189,6 +191,32 @@ function onEscape(event) {
     closeCardCrafter();
 }
 
+function switchTab(root, tabId) {
+    state.tab = tabId;
+    root.querySelectorAll('[data-cc-tab]').forEach((btn) => {
+        const active = btn.dataset.ccTab === tabId;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    renderTab(root);
+}
+
+async function ensureCardLoaded(root) {
+    if (state.uploadedCard) return state.uploadedCard;
+
+    const selected = root.querySelector('.cc-library-select')?.value
+        || state.selectedAvatar
+        || getCurrentCharacterRef()?.avatar
+        || '';
+    if (selected) {
+        await ingestLibraryCard(selected, root, { quiet: true });
+        if (state.uploadedCard) return state.uploadedCard;
+    }
+
+    toast('warning', 'Pick a library character or upload a card first.');
+    return null;
+}
+
 function renderTab(root) {
     const body = root.querySelector('#cc-body');
     if (!body) return;
@@ -296,9 +324,11 @@ function renderLibraryPicker(id) {
 function renderRemake() {
     const settings = getSettings();
     const ready = Boolean(state.uploadedCard);
+    const hasCritique = Boolean(state.analysis);
+    const critiquePreview = formatAnalysisBrief(state.analysis);
     return `
     <div class="card-crafter-form">
-      <p class="card-crafter-lead">Pick a character already in SillyTavern and remake it. Keep the soul, clean the slop, optionally build a lorebook.</p>
+      <p class="card-crafter-lead">Pick a character already in SillyTavern and remake it. If you already ran Analyze, that critique is applied automatically. Add your own extra direction on top.</p>
       ${renderLibraryPicker('cc-remake-library')}
       <label class="card-crafter-drop" id="cc-remake-drop">
         <input type="file" id="cc-remake-file" accept=".png,.json,application/json,image/png">
@@ -306,20 +336,25 @@ function renderRemake() {
         <strong>${state.uploadedName || 'Or upload a sloppy card'}</strong>
         <span>${ready ? 'Ready to remake' : 'PNG or JSON'}</span>
       </label>
+      ${hasCritique ? `
+      <details class="card-crafter-preview" open>
+        <summary>Analyzer critique to apply</summary>
+        <p>${escapeHtml(critiquePreview)}</p>
+      </details>` : `<p class="card-crafter-muted">No Analyze result yet. Remake will still clean the card. Run Analyze first if you want the model to apply a specific critique.</p>`}
       <label class="card-crafter-field">
-        <span>Remake direction <em>optional</em></span>
-        <textarea id="cc-remake-extra" rows="3" placeholder="Keep the name. Cut the harem bait. Make her a competent cartographer."></textarea>
+        <span>Extra changes <em>optional, wins over the critique</em></span>
+        <textarea id="cc-remake-extra" rows="4" placeholder="Keep the name. Cut the harem bait. Make her a competent cartographer.">${escapeHtml(state.remakeExtra || '')}</textarea>
       </label>
       <label class="card-crafter-field">
         <span>Creativity <strong id="cc-remake-creativity-label">${settings.defaultCreativity} · ${creativityLabel(settings.defaultCreativity)}</strong></span>
         <input type="range" id="cc-remake-creativity" min="0" max="100" step="5" value="${settings.defaultCreativity}">
       </label>
       <label class="card-crafter-check">
-        <input type="checkbox" id="cc-remake-lore" checked>
+        <input type="checkbox" id="cc-remake-lore" ${state.remakeIncludeLore ? 'checked' : ''}>
         <span>Build a lorebook if the remake needs one</span>
       </label>
       <div class="card-crafter-actions">
-        <button type="button" class="card-crafter-primary" id="cc-remake-btn" ${ready ? '' : 'disabled'}>
+        <button type="button" class="card-crafter-primary" id="cc-remake-btn">
           <i class="fa-solid fa-screwdriver-wrench"></i>
           <span>Remake card</span>
         </button>
@@ -551,13 +586,7 @@ function bindTab(root) {
 
 function bindShared(root) {
     root.querySelector('[data-cc-goto-remake]')?.addEventListener('click', () => {
-        state.tab = 'remediate';
-        root.querySelectorAll('[data-cc-tab]').forEach((btn) => {
-            const active = btn.dataset.ccTab === 'remediate';
-            btn.classList.toggle('is-active', active);
-            btn.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
-        renderTab(root);
+        switchTab(root, 'remediate');
     });
 
     root.querySelector('[data-cc-import-char]')?.addEventListener('click', async (event) => {
@@ -692,6 +721,8 @@ function bindLibraryPicker(root) {
             try {
                 setBusy(button, true, 'Loading…');
                 await ingestLibraryCard(avatar, root);
+            } catch (error) {
+                toast('error', error.message || String(error));
             } finally {
                 setBusy(button, false);
             }
@@ -700,25 +731,26 @@ function bindLibraryPicker(root) {
     root.querySelectorAll('.cc-library-select').forEach((select) => {
         select.addEventListener('change', async () => {
             if (!select.value) return;
-            await ingestLibraryCard(select.value, root);
+            try {
+                await ingestLibraryCard(select.value, root);
+            } catch (error) {
+                toast('error', error.message || String(error));
+            }
         });
     });
 }
 
-async function ingestLibraryCard(avatar, root) {
-    try {
-        const card = await loadLibraryCharacter(avatar);
-        state.uploadedCard = card;
-        state.uploadedName = card.name || 'Library card';
-        state.selectedAvatar = avatar;
-        const drop = root.querySelector('.card-crafter-drop strong');
-        if (drop) drop.textContent = state.uploadedName;
-        const remakeBtn = root.querySelector('#cc-remake-btn');
-        if (remakeBtn) remakeBtn.disabled = false;
-        toast('info', `Loaded ${state.uploadedName} from your library.`);
-    } catch (error) {
-        toast('error', error.message || String(error));
-    }
+async function ingestLibraryCard(avatar, root, { quiet = false } = {}) {
+    const card = await loadLibraryCharacter(avatar);
+    state.uploadedCard = card;
+    state.uploadedName = card.name || 'Library card';
+    state.selectedAvatar = avatar;
+    const drop = root.querySelector('.card-crafter-drop strong');
+    if (drop) drop.textContent = state.uploadedName;
+    const remakeBtn = root.querySelector('#cc-remake-btn');
+    if (remakeBtn) remakeBtn.disabled = false;
+    if (!quiet) toast('info', `Loaded ${state.uploadedName} from your library.`);
+    return card;
 }
 
 function bindAnalyze(root) {
@@ -735,13 +767,11 @@ function bindAnalyze(root) {
                 state.uploadedCard = parseImportedCard(pasted);
                 state.uploadedName = state.uploadedCard.name || 'Pasted card';
             }
-            if (!state.uploadedCard) {
-                toast('warning', 'Upload or paste a card first.');
-                return;
-            }
+            const card = await ensureCardLoaded(root);
+            if (!card) return;
             setBusy(btn, true, 'Asking the model…');
             const settings = getSettings();
-            const judgement = await gradeCardWithAi(flattenCardForPrompt(state.uploadedCard));
+            const judgement = await gradeCardWithAi(flattenCardForPrompt(card));
             state.analysis = normalizeAiJudgement(judgement, { threshold: settings.slopThreshold });
             root.querySelector('#cc-analyze-result').innerHTML = renderAnalysis(state.analysis, state.uploadedCard);
             bindShared(root);
@@ -760,6 +790,12 @@ function bindRemake(root) {
     slider?.addEventListener('input', () => {
         label.textContent = `${slider.value} · ${creativityLabel(slider.value)}`;
     });
+    root.querySelector('#cc-remake-extra')?.addEventListener('input', (event) => {
+        state.remakeExtra = event.currentTarget.value;
+    });
+    root.querySelector('#cc-remake-lore')?.addEventListener('change', (event) => {
+        state.remakeIncludeLore = Boolean(event.currentTarget.checked);
+    });
     root.querySelector('#cc-remake-file')?.addEventListener('change', async (event) => {
         const file = event.target.files?.[0];
         if (file) {
@@ -768,18 +804,21 @@ function bindRemake(root) {
         }
     });
     root.querySelector('#cc-remake-btn')?.addEventListener('click', async (event) => {
-        if (!state.uploadedCard) {
-            toast('warning', 'Upload a card to remake.');
-            return;
-        }
         const btn = event.currentTarget;
         try {
+            const card = await ensureCardLoaded(root);
+            if (!card) return;
+            const extra = root.querySelector('#cc-remake-extra')?.value.trim() || '';
+            const includeLorebook = Boolean(root.querySelector('#cc-remake-lore')?.checked);
+            state.remakeExtra = extra;
+            state.remakeIncludeLore = includeLorebook;
             setBusy(btn, true, 'Remaking…');
             const result = await remakeCharacter({
-                cardText: flattenCardForPrompt(state.uploadedCard),
-                creativity: Number(slider.value),
-                extra: root.querySelector('#cc-remake-extra').value.trim(),
-                includeLorebook: Boolean(root.querySelector('#cc-remake-lore')?.checked),
+                cardText: flattenCardForPrompt(card),
+                creativity: Number(slider?.value ?? getSettings().defaultCreativity),
+                extra,
+                critique: formatAnalysisBrief(state.analysis),
+                includeLorebook,
             });
             state.remakeResult = result;
             state.lastResult = result;
@@ -788,6 +827,7 @@ function bindRemake(root) {
             bindShared(root);
             toast('success', 'Remake ready.');
         } catch (error) {
+            console.error('[Card Crafter] Remake failed', error);
             toast('error', error.message || String(error));
         } finally {
             setBusy(btn, false);

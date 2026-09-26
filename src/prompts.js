@@ -146,18 +146,25 @@ JSON shape:
 }`;
 }
 
-export function buildRemakePrompt({ cardText, creativity, extra = '', includeLorebook = true }) {
+export function buildRemakePrompt({ cardText, creativity, extra = '', critique = '', includeLorebook = true }) {
     return `${SHARED_RULES}
 
 ${creativityBlock(creativity)}
 
 Task: remake the uploaded character card. Keep the soul of the character (name, role, relationships, setting) unless the user asked to change them. Fix slop, split mashed fields, replace cliches with specific detail, and write a card a good model can actually play.
 
+Priority:
+1. User extra direction, if any. Follow it even when it disagrees with the critique.
+2. Analyzer critique. Treat every listed issue as a required fix unless the user overrode it.
+3. Keep the character recognizable.
+
 Also produce a lorebook if the character needs one (setting rules, named people, places, items). If the world is tiny, return an empty lorebook array.
+Keep the JSON compact enough to finish. Prefer 4-8 lore entries over a novel.
 
 Current card:
 ${cardText}
-${extra ? `\nAdditional direction:\n${extra}` : ''}
+${critique ? `\nAnalyzer critique to apply:\n${critique}` : ''}
+${extra ? `\nAdditional user direction (wins if it conflicts with the critique):\n${extra}` : ''}
 
 JSON shape:
 {
