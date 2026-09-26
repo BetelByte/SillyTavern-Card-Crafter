@@ -19,9 +19,11 @@ export const GENERATION_TYPES = [
 export const DEFAULT_SETTINGS = {
     slopThreshold: 55,
     defaultCreativity: 45,
-    maxResponseTokens: 3500,
+    maxResponseTokens: 0,
     autoImportLorebook: true,
     compactMobile: true,
     creatorName: '',
+    errorLogSeq: 0,
+    errorLogs: [],
 };
 

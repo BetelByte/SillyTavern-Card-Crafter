@@ -1,3 +1,4 @@
+import { logWarn } from './error-log.js';
 import { getContext, getSettings } from './settings.js';
 import { uniqueStrings, sanitizeFileName, toast } from './utils.js';
 import { normalizeCard } from './slop.js';
@@ -284,7 +285,7 @@ export async function importPersonaToSillyTavern(payload) {
             body: formData,
         });
     } catch (error) {
-        console.warn('[Card Crafter] Persona avatar upload failed; persona was still saved.', error);
+        logWarn(error, { source: 'persona-avatar', extra: { name: payload?.name || '' } });
     }
 
     return avatarId;

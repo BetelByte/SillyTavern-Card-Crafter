@@ -1,3 +1,4 @@
+import { logWarn } from './error-log.js';
 import { getContext, getActiveProfileId, getSettings } from './settings.js';
 import { extractJsonObject } from './utils.js';
 import {
@@ -127,6 +128,21 @@ async function consumeStream(result, { signal, onChunk } = {}) {
     return text;
 }
 
+function resolveMaxTokens(override) {
+    if (override === 0 || override === 'unlimited') return 0;
+    if (Number.isFinite(Number(override)) && Number(override) > 0) {
+        return Math.round(Number(override));
+    }
+    const setting = Number(getSettings().maxResponseTokens);
+    if (!Number.isFinite(setting) || setting <= 0) return 0;
+    return Math.round(setting);
+}
+
+function withTokenBudget(payload, tokens) {
+    if (!tokens) return payload;
+    return { ...payload, max_tokens: tokens };
+}
+
 async function requestViaProfile({ prompt, systemPrompt, tokens, temperature, signal, onChunk }) {
     const ctx = getContext();
     const profileId = getActiveProfileId();
@@ -137,7 +153,7 @@ async function requestViaProfile({ prompt, systemPrompt, tokens, temperature, si
     const result = await ctx.ConnectionManagerRequestService.sendRequest(
         profileId,
         buildMessages(prompt, systemPrompt),
-        tokens,
+        tokens || undefined,
         { extractData: true, stream: true, signal },
         Number.isFinite(temperature) ? { temperature } : {},
     );
@@ -150,31 +166,29 @@ async function requestViaCurrentApi({ prompt, systemPrompt, tokens, temperature,
     const messages = buildMessages(prompt, systemPrompt);
 
     if (api === 'openai' && ctx.ChatCompletionService?.processRequest) {
-        const result = await ctx.ChatCompletionService.processRequest({
+        const result = await ctx.ChatCompletionService.processRequest(withTokenBudget({
             stream: true,
             messages,
-            max_tokens: tokens,
             model: ctx.getChatCompletionModel?.() || undefined,
             chat_completion_source: ctx.chatCompletionSettings?.chat_completion_source,
             temperature,
             custom_url: ctx.chatCompletionSettings?.custom_url,
             reverse_proxy: ctx.chatCompletionSettings?.reverse_proxy,
             proxy_password: ctx.chatCompletionSettings?.proxy_password,
-        }, {}, true, signal);
+        }, tokens), {}, true, signal);
         return consumeStream(result, { signal, onChunk });
     }
 
     if (api === 'textgenerationwebui' && ctx.TextCompletionService?.processRequest) {
         const instructEnabled = Boolean(ctx.powerUserSettings?.instruct?.enabled);
-        const result = await ctx.TextCompletionService.processRequest({
+        const result = await ctx.TextCompletionService.processRequest(withTokenBudget({
             stream: true,
             prompt: messages,
-            max_tokens: tokens,
             model: ctx.textCompletionSettings?.model,
             api_type: ctx.textCompletionSettings?.type,
             api_server: typeof ctx.getTextGenServer === 'function' ? ctx.getTextGenServer() : undefined,
             temperature,
-        }, {
+        }, tokens), {
             instructName: instructEnabled ? ctx.powerUserSettings?.instruct?.preset : undefined,
         }, true, signal);
         return consumeStream(result, { signal, onChunk });
@@ -196,7 +210,7 @@ async function requestViaGenerateRaw({ prompt, systemPrompt, tokens, signal, onC
         systemPrompt: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT),
         instructOverride: true,
         quietToLoud: false,
-        responseLength: tokens,
+        ...(tokens ? { responseLength: tokens } : {}),
     });
     throwIfAborted(signal);
 
@@ -215,8 +229,7 @@ export async function generateText({
     signal,
     onChunk,
 } = {}) {
-    const settings = getSettings();
-    const tokens = maxTokens || settings.maxResponseTokens || 3500;
+    const tokens = resolveMaxTokens(maxTokens);
     const temperature = creativityToTemperature(creativity);
     const profileId = getActiveProfileId();
     let text = '';
@@ -228,7 +241,7 @@ export async function generateText({
             streamed = text != null;
         } catch (error) {
             if (isAbortError(error) || signal?.aborted) throw error;
-            console.warn('[Card Crafter] Connection profile stream failed, trying the current API.', error);
+            logWarn(error, { source: 'generate-profile', extra: { fallback: 'current-api' } });
         }
     }
 
@@ -241,7 +254,7 @@ export async function generateText({
             }
         } catch (error) {
             if (isAbortError(error) || signal?.aborted) throw error;
-            console.warn('[Card Crafter] Current API stream failed, falling back to generateRaw.', error);
+            logWarn(error, { source: 'generate-current-api', extra: { fallback: 'generateRaw' } });
         }
     }
 
@@ -299,37 +312,30 @@ export function generatePersona(options) {
     return generateJson({
         prompt: buildPersonaPrompt(options),
         creativity: options.creativity,
-        maxTokens: 1800,
         signal: options.signal,
         onChunk: options.onChunk,
     });
 }
 
 export async function remakeCharacter(options) {
-    const settings = getSettings();
-    const tokens = Math.max(Number(settings.maxResponseTokens) || 0, 4000);
     const result = await generateJson({
         prompt: buildRemakePrompt(options),
         creativity: options.creativity,
-        maxTokens: tokens,
         signal: options.signal,
         onChunk: options.onChunk,
     });
     const name = String(result?.name || '').trim();
     const description = String(result?.description || '').trim();
     if (!name || !description) {
-        throw new Error('Remake came back without a usable name/description. The model probably ran out of tokens — try again with lorebook off, or raise max response tokens.');
+        throw new Error('Remake came back without a usable name/description. The model probably ran out of tokens — turn Unlimited on in Settings, or raise max response tokens.');
     }
     return result;
 }
 
 export function gradeCardWithAi(cardText, options = {}) {
-    const settings = getSettings();
-    const tokens = Math.max(Number(settings.maxResponseTokens) || 0, 2200);
     return generateJson({
         prompt: buildAiSlopPrompt(cardText),
         creativity: 15,
-        maxTokens: tokens,
         signal: options.signal,
         onChunk: options.onChunk,
     });

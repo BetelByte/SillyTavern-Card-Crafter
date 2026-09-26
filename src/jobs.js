@@ -7,6 +7,7 @@ import {
     remakeCharacter,
 } from './generate.js';
 import { flattenCardForPrompt, normalizeAiJudgement } from './slop.js';
+import { logError, logWarn } from './error-log.js';
 
 const listeners = new Set();
 /** @type {Map<string, object>} */
@@ -23,7 +24,7 @@ function emit(job) {
         try {
             listener(job);
         } catch (error) {
-            console.warn('[Card Crafter] Job listener failed.', error);
+            logWarn(error, { source: 'job-listener', extra: { jobId: job?.id, status: job?.status } });
         }
     }
 }
@@ -136,7 +137,14 @@ async function runJob(job, worker) {
         if (isAbortError(error) || job.controller.signal.aborted) {
             return finishJob(job, { status: 'stopped', error: 'Stopped.' });
         }
-        console.error(`[Card Crafter] ${job.kind} failed`, error);
+        const entry = await logError(error, {
+            source: `${job.kind}-job`,
+            jobId: job.id,
+            label: job.label,
+            output: job.text || job.reasoning || '',
+            extra: job.meta || {},
+        });
+        if (entry?.title) job.logTitle = entry.title;
         return finishJob(job, { status: 'error', error: error.message || String(error) });
     }
 }

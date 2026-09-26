@@ -26,6 +26,7 @@ import {
     listLibraryCharacters,
     loadLibraryCharacter,
 } from './characters.js';
+import { reportError } from './error-log.js';
 import { getConnectionProfiles, getSettings, updateSetting } from './settings.js';
 import { formatAnalysisBrief, normalizeCard } from './slop.js';
 import {
@@ -80,8 +81,7 @@ export function openCardCrafter(event) {
             openWithPopup();
         } catch (error) {
             resetOpenState();
-            console.error('[Card Crafter] Failed to open panel', error);
-            toast('error', error.message || 'Could not open Card Crafter.');
+            reportError(error, { source: 'open-panel' });
         }
     }, 50);
 }
@@ -92,7 +92,9 @@ function ensureJobBridge() {
         applyJobToState(job);
         refreshLiveUi(job);
         if (job.status === 'done') notifyJobDone(job);
-        if (job.status === 'error') toast('error', job.error || 'Generation failed.');
+        if (job.status === 'error') {
+            toast('error', job.logTitle ? `${job.error}  ·  ${job.logTitle}` : (job.error || 'Generation failed.'));
+        }
         if (job.status === 'stopped') toast('warning', `${job.label} stopped.`);
     });
 }
@@ -164,8 +166,7 @@ function openWithPopup() {
         document.addEventListener('keydown', onEscape);
         popup.show().catch((error) => {
             resetOpenState();
-            console.error('[Card Crafter] Popup failed', error);
-            toast('error', error.message || 'Could not open Card Crafter.');
+            reportError(error, { source: 'popup' });
         });
         return;
     }
@@ -553,9 +554,14 @@ function renderSettings() {
         <span>Default creativity <strong id="cc-default-creativity-label">${settings.defaultCreativity} · ${creativityLabel(settings.defaultCreativity)}</strong></span>
         <input type="range" id="cc-default-creativity" min="0" max="100" step="5" value="${settings.defaultCreativity}">
       </label>
-      <label class="card-crafter-field">
+      <label class="card-crafter-check">
+        <input type="checkbox" id="cc-unlimited-tokens" ${!Number(settings.maxResponseTokens) ? 'checked' : ''}>
+        <span>Unlimited response length</span>
+      </label>
+      <label class="card-crafter-field" id="cc-max-tokens-wrap">
         <span>Max response tokens</span>
-        <input type="number" id="cc-max-tokens" min="800" max="8000" step="100" value="${settings.maxResponseTokens}">
+        <input type="number" id="cc-max-tokens" min="256" step="100" value="${Number(settings.maxResponseTokens) > 0 ? settings.maxResponseTokens : 3500}">
+        <small>Leave Unlimited on if you want the model to write as long as it wants. A number here is only a safety cap.</small>
       </label>
       <label class="card-crafter-check">
         <input type="checkbox" id="cc-auto-lore" ${settings.autoImportLorebook ? 'checked' : ''}>
@@ -567,6 +573,7 @@ function renderSettings() {
           <span>Save settings</span>
         </button>
       </div>
+      <p class="card-crafter-muted">Error logs: <code>SillyTavern/data/&lt;user&gt;/user/files/ERROR_LOG_*.txt</code>. Named <code>[ERROR LOG] (n) [DD/MM/YYYY] [HH:MM:SS]</code>. ${Array.isArray(settings.errorLogs) && settings.errorLogs.length ? `${settings.errorLogs.length} stored.` : 'None yet.'}</p>
       <p class="card-crafter-muted">Repo: <code>https://github.com/BetelByte/${EXTENSION_NAME}</code></p>
     </form>
   `;
@@ -771,7 +778,7 @@ function bindShared(root) {
             const name = await importLorebookToSillyTavern(book);
             describeImport('Lorebook', name);
         } catch (error) {
-            toast('error', error.message || String(error));
+            reportError(error, { source: 'import-lorebook', extra: { name: state.lastResult?.name || '' } });
         } finally {
             setBusy(btn, false);
         }
@@ -789,7 +796,7 @@ function bindShared(root) {
             await importPersonaToSillyTavern(persona);
             describeImport('Persona', persona.name);
         } catch (error) {
-            toast('error', error.message || String(error));
+            reportError(error, { source: 'import-persona', extra: { name: persona?.name || '' } });
         } finally {
             setBusy(btn, false);
         }
@@ -812,7 +819,7 @@ async function handleCharacterImport(btn, withLore) {
         await importCharacterToSillyTavern(payload, { worldName });
         describeImport('Character', payload.name);
     } catch (error) {
-        toast('error', error.message || String(error));
+        reportError(error, { source: 'import-character', extra: { name: payload?.name || '', withLore } });
     } finally {
         setBusy(btn, false);
     }
@@ -884,7 +891,7 @@ function bindLibraryPicker(root) {
                 setBusy(button, true, 'Loading…');
                 await ingestLibraryCard(avatar, root);
             } catch (error) {
-                toast('error', error.message || String(error));
+                reportError(error, { source: 'library-load', extra: { avatar } });
             } finally {
                 setBusy(button, false);
             }
@@ -896,7 +903,7 @@ function bindLibraryPicker(root) {
             try {
                 await ingestLibraryCard(select.value, root);
             } catch (error) {
-                toast('error', error.message || String(error));
+                reportError(error, { source: 'library-select', extra: { avatar: select.value } });
             }
         });
     });
@@ -936,7 +943,7 @@ function bindAnalyze(root) {
             });
             toast('info', 'Judging started. You can switch tabs or keep chatting.');
         } catch (error) {
-            toast('error', error.message || String(error));
+            reportError(error, { source: 'analyze-start' });
         }
     });
 }
@@ -981,8 +988,7 @@ function bindRemake(root) {
             });
             toast('info', 'Remake started. You can switch tabs or keep chatting.');
         } catch (error) {
-            console.error('[Card Crafter] Remake failed', error);
-            toast('error', error.message || String(error));
+            reportError(error, { source: 'remake-start' });
         }
     });
 }
@@ -998,13 +1004,23 @@ function bindSettings(root) {
     creativity?.addEventListener('input', () => {
         creativityLabelEl.textContent = `${creativity.value} · ${creativityLabel(creativity.value)}`;
     });
+    const unlimited = root.querySelector('#cc-unlimited-tokens');
+    const tokenWrap = root.querySelector('#cc-max-tokens-wrap');
+    const tokenInput = root.querySelector('#cc-max-tokens');
+    const syncTokenUi = () => {
+        const on = Boolean(unlimited?.checked);
+        if (tokenWrap) tokenWrap.style.display = on ? 'none' : '';
+        if (tokenInput) tokenInput.disabled = on;
+    };
+    unlimited?.addEventListener('change', syncTokenUi);
+    syncTokenUi();
     root.querySelector('#cc-settings-form')?.addEventListener('submit', (event) => {
         event.preventDefault();
         updateSetting('profileId', root.querySelector('#cc-profile').value);
         updateSetting('creatorName', root.querySelector('#cc-creator').value.trim());
         updateSetting('slopThreshold', Number(threshold.value));
         updateSetting('defaultCreativity', Number(creativity.value));
-        updateSetting('maxResponseTokens', Number(root.querySelector('#cc-max-tokens').value) || 3500);
+        updateSetting('maxResponseTokens', unlimited?.checked ? 0 : (Number(tokenInput?.value) || 3500));
         updateSetting('autoImportLorebook', root.querySelector('#cc-auto-lore').checked);
         toast('success', 'Settings saved.');
     });
@@ -1027,6 +1043,6 @@ async function ingestCard(file, root) {
         if (drop) drop.textContent = state.uploadedName;
         toast('info', `Loaded ${state.uploadedName}`);
     } catch (error) {
-        toast('error', error.message || String(error));
+        reportError(error, { source: 'ingest-card', extra: { file: file?.name || '' } });
     }
 }

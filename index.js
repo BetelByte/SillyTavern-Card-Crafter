@@ -1,4 +1,5 @@
 import { EXTENSION_NAME, MODULE_NAME } from './src/constants.js';
+import { logError, logWarn, reportError } from './src/error-log.js';
 import { getSettings } from './src/settings.js';
 import { closeCardCrafter, openCardCrafter } from './src/ui.js';
 import { toast } from './src/utils.js';
@@ -74,7 +75,7 @@ async function addSettingsDrawer() {
         const html = await globalContext.renderExtensionTemplateAsync(`third-party/${EXTENSION_NAME}`, 'settings');
         container.insertAdjacentHTML('beforeend', html);
     } catch (error) {
-        console.warn('[Card Crafter] Could not render settings template, using fallback.', error);
+        logWarn(error, { source: 'settings-template' });
         container.insertAdjacentHTML('beforeend', `
             <div class="card-crafter-settings">
                 <div class="inline-drawer">
@@ -110,7 +111,7 @@ function registerSlashCommand() {
             helpString: 'Open Card Crafter to generate or remake a character, lorebook, or persona.',
         }));
     } catch (error) {
-        console.warn('[Card Crafter] Slash command registration failed.', error);
+        logWarn(error, { source: 'slash-command' });
     }
 }
 
@@ -124,10 +125,11 @@ export async function init() {
 }
 
 if (!importCheck()) {
-    toast('error', 'SillyTavern is too old for Card Crafter. Update ST and try again.');
+    const error = new Error('SillyTavern is too old for Card Crafter. Update ST and try again.');
+    reportError(error, { source: 'import-check' });
 } else {
     init().catch((error) => {
-        console.error(`[${MODULE_NAME}] init failed`, error);
+        logError(error, { source: 'init' });
         toast('error', error.message || 'Card Crafter failed to load.');
     });
 }

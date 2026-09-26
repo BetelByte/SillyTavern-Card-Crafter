@@ -71,8 +71,9 @@ Select the character from your library (or upload a card), say what to keep or c
 - Creator name stamped on new cards
 - Slop threshold (default 55)
 - Default creativity
-- Max response tokens
+- Max response tokens, or Unlimited (default)
 - Auto-draft lorebook with characters
+- Error logs written to `SillyTavern/data/<user>/user/files/` as `ERROR_LOG_<n>_<DD-MM-YYYY>_<HH-MM-SS>.txt`
 
 ## Notes
 
@@ -80,6 +81,7 @@ Select the character from your library (or upload a card), say what to keep or c
 - Personas are imported as user personas, not bot cards.
 - PNG read support is for standard tavern `chara` / `ccv3` chunks, including compressed `zTXt` / `iTXt` when the browser can inflate them.
 - This is not a jailbreak tool and it will not write one into your cards.
+- When something breaks, Card Crafter writes a numbered error log. Tell the assistant to scan those files instead of pasting the toast.
 
 ## Development
 
@@ -98,6 +100,8 @@ SillyTavern-Card-Crafter/
     generate.js
     slop.js
     importers.js
+    error-log.js
+    jobs.js
     ui.js
     utils.js
 ```
