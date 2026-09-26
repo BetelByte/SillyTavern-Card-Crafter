@@ -37,10 +37,24 @@ export function creativityToTemperature(level) {
     return Math.round((0.35 + (value / 100) * 0.85) * 100) / 100;
 }
 
+export function isAbortError(error) {
+    return Boolean(
+        error
+        && (error.name === 'AbortError' || error.code === 20 || /aborted|abort/i.test(String(error.message || ''))),
+    );
+}
+
 function snippet(text, max = 280) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
     if (!value) return '(empty)';
     return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        const error = new DOMException('Generation stopped.', 'AbortError');
+        throw error;
+    }
 }
 
 function stripReasoning(text) {
@@ -83,36 +97,100 @@ function extractContent(result) {
     return JSON.stringify(result);
 }
 
-async function requestViaProfile({ prompt, systemPrompt, tokens, temperature }) {
+function buildMessages(prompt, systemPrompt) {
+    return [
+        { role: 'system', content: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT) },
+        { role: 'user', content: neutralizeStMacros(prompt) },
+    ];
+}
+
+async function consumeStream(result, { signal, onChunk } = {}) {
+    if (typeof result === 'function') {
+        let text = '';
+        let reasoning = '';
+        for await (const chunk of result()) {
+            throwIfAborted(signal);
+            if (typeof chunk === 'string') {
+                text = chunk;
+            } else {
+                text = chunk?.text ?? text;
+                reasoning = chunk?.state?.reasoning ?? reasoning;
+            }
+            onChunk?.({ text, reasoning, streaming: true });
+        }
+        return reasoning && !String(text || '').trim() ? reasoning : text;
+    }
+
+    const text = extractContent(result);
+    const reasoning = typeof result?.reasoning === 'string' ? result.reasoning : '';
+    onChunk?.({ text, reasoning, streaming: false });
+    return text;
+}
+
+async function requestViaProfile({ prompt, systemPrompt, tokens, temperature, signal, onChunk }) {
     const ctx = getContext();
     const profileId = getActiveProfileId();
     if (!profileId || !ctx.ConnectionManagerRequestService?.sendRequest) {
         return null;
     }
 
-    const messages = [
-        { role: 'system', content: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT) },
-        { role: 'user', content: neutralizeStMacros(prompt) },
-    ];
-
     const result = await ctx.ConnectionManagerRequestService.sendRequest(
         profileId,
-        messages,
+        buildMessages(prompt, systemPrompt),
         tokens,
-        { extractData: true },
+        { extractData: true, stream: true, signal },
         Number.isFinite(temperature) ? { temperature } : {},
     );
-    return extractContent(result);
+    return consumeStream(result, { signal, onChunk });
 }
 
-async function requestViaGenerateRaw({ prompt, systemPrompt, tokens }) {
+async function requestViaCurrentApi({ prompt, systemPrompt, tokens, temperature, signal, onChunk }) {
+    const ctx = getContext();
+    const api = ctx.mainApi;
+    const messages = buildMessages(prompt, systemPrompt);
+
+    if (api === 'openai' && ctx.ChatCompletionService?.processRequest) {
+        const result = await ctx.ChatCompletionService.processRequest({
+            stream: true,
+            messages,
+            max_tokens: tokens,
+            model: ctx.getChatCompletionModel?.() || undefined,
+            chat_completion_source: ctx.chatCompletionSettings?.chat_completion_source,
+            temperature,
+            custom_url: ctx.chatCompletionSettings?.custom_url,
+            reverse_proxy: ctx.chatCompletionSettings?.reverse_proxy,
+            proxy_password: ctx.chatCompletionSettings?.proxy_password,
+        }, {}, true, signal);
+        return consumeStream(result, { signal, onChunk });
+    }
+
+    if (api === 'textgenerationwebui' && ctx.TextCompletionService?.processRequest) {
+        const instructEnabled = Boolean(ctx.powerUserSettings?.instruct?.enabled);
+        const result = await ctx.TextCompletionService.processRequest({
+            stream: true,
+            prompt: messages,
+            max_tokens: tokens,
+            model: ctx.textCompletionSettings?.model,
+            api_type: ctx.textCompletionSettings?.type,
+            api_server: typeof ctx.getTextGenServer === 'function' ? ctx.getTextGenServer() : undefined,
+            temperature,
+        }, {
+            instructName: instructEnabled ? ctx.powerUserSettings?.instruct?.preset : undefined,
+        }, true, signal);
+        return consumeStream(result, { signal, onChunk });
+    }
+
+    return null;
+}
+
+async function requestViaGenerateRaw({ prompt, systemPrompt, tokens, signal, onChunk }) {
     const ctx = getContext();
     if (typeof ctx.generateRaw !== 'function') {
         throw new Error('SillyTavern generation API is unavailable. Update ST or pick a connection profile.');
     }
 
-    // Do not pass jsonSchema. ST only extracts schema JSON for OpenAI-style
-    // chat completion; every other backend comes back as "{}".
+    throwIfAborted(signal);
+    onChunk?.({ text: '', reasoning: '', streaming: false });
     const raw = await ctx.generateRaw({
         prompt: neutralizeStMacros(prompt),
         systemPrompt: neutralizeStMacros(systemPrompt || JSON_SYSTEM_PROMPT),
@@ -120,35 +198,59 @@ async function requestViaGenerateRaw({ prompt, systemPrompt, tokens }) {
         quietToLoud: false,
         responseLength: tokens,
     });
+    throwIfAborted(signal);
 
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        return JSON.stringify(raw);
-    }
-    return String(raw ?? '');
+    const text = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? JSON.stringify(raw)
+        : String(raw ?? '');
+    onChunk?.({ text, reasoning: '', streaming: false });
+    return text;
 }
 
-export async function generateText({ prompt, systemPrompt = JSON_SYSTEM_PROMPT, maxTokens, creativity }) {
+export async function generateText({
+    prompt,
+    systemPrompt = JSON_SYSTEM_PROMPT,
+    maxTokens,
+    creativity,
+    signal,
+    onChunk,
+} = {}) {
     const settings = getSettings();
     const tokens = maxTokens || settings.maxResponseTokens || 3500;
     const temperature = creativityToTemperature(creativity);
     const profileId = getActiveProfileId();
-
     let text = '';
-    let usedProfile = false;
+    let streamed = false;
 
     if (profileId) {
         try {
-            text = await requestViaProfile({ prompt, systemPrompt, tokens, temperature });
-            usedProfile = Boolean(String(text || '').trim());
+            text = await requestViaProfile({ prompt, systemPrompt, tokens, temperature, signal, onChunk });
+            streamed = text != null;
         } catch (error) {
-            console.warn('[Card Crafter] Connection profile request failed, falling back to generateRaw.', error);
+            if (isAbortError(error) || signal?.aborted) throw error;
+            console.warn('[Card Crafter] Connection profile stream failed, trying the current API.', error);
         }
     }
 
-    if (!usedProfile) {
-        text = await requestViaGenerateRaw({ prompt, systemPrompt, tokens });
+    if (!streamed) {
+        try {
+            const current = await requestViaCurrentApi({ prompt, systemPrompt, tokens, temperature, signal, onChunk });
+            if (current != null) {
+                text = current;
+                streamed = true;
+            }
+        } catch (error) {
+            if (isAbortError(error) || signal?.aborted) throw error;
+            console.warn('[Card Crafter] Current API stream failed, falling back to generateRaw.', error);
+        }
     }
 
+    if (!streamed) {
+        onChunk?.({ text: '', reasoning: '', streaming: false, fallback: true });
+        text = await requestViaGenerateRaw({ prompt, systemPrompt, tokens, signal, onChunk });
+    }
+
+    throwIfAborted(signal);
     const cleaned = stripReasoning(text);
     const usable = cleaned.trim() || String(text || '').trim();
     if (!usable) {
@@ -165,8 +267,8 @@ function parseJsonPayload(text) {
     return restoreStMacros(parsed);
 }
 
-export async function generateJson({ prompt, systemPrompt, creativity, maxTokens }) {
-    const text = await generateText({ prompt, systemPrompt, creativity, maxTokens });
+export async function generateJson({ prompt, systemPrompt, creativity, maxTokens, signal, onChunk } = {}) {
+    const text = await generateText({ prompt, systemPrompt, creativity, maxTokens, signal, onChunk });
     try {
         return parseJsonPayload(text);
     } catch (error) {
@@ -179,6 +281,8 @@ export function generateCharacter(options) {
     return generateJson({
         prompt: buildCharacterPrompt(options),
         creativity: options.creativity,
+        signal: options.signal,
+        onChunk: options.onChunk,
     });
 }
 
@@ -186,6 +290,8 @@ export function generateLorebook(options) {
     return generateJson({
         prompt: buildLorebookPrompt(options),
         creativity: options.creativity,
+        signal: options.signal,
+        onChunk: options.onChunk,
     });
 }
 
@@ -194,6 +300,8 @@ export function generatePersona(options) {
         prompt: buildPersonaPrompt(options),
         creativity: options.creativity,
         maxTokens: 1800,
+        signal: options.signal,
+        onChunk: options.onChunk,
     });
 }
 
@@ -204,6 +312,8 @@ export async function remakeCharacter(options) {
         prompt: buildRemakePrompt(options),
         creativity: options.creativity,
         maxTokens: tokens,
+        signal: options.signal,
+        onChunk: options.onChunk,
     });
     const name = String(result?.name || '').trim();
     const description = String(result?.description || '').trim();
@@ -213,12 +323,14 @@ export async function remakeCharacter(options) {
     return result;
 }
 
-export function gradeCardWithAi(cardText) {
+export function gradeCardWithAi(cardText, options = {}) {
     const settings = getSettings();
     const tokens = Math.max(Number(settings.maxResponseTokens) || 0, 2200);
     return generateJson({
         prompt: buildAiSlopPrompt(cardText),
         creativity: 15,
         maxTokens: tokens,
+        signal: options.signal,
+        onChunk: options.onChunk,
     });
 }

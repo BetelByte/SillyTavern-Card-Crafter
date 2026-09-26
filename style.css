@@ -537,6 +537,70 @@
     padding-top: 4px;
 }
 
+.card-crafter-job,
+.card-crafter-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--cc-line);
+    border-radius: 16px;
+    background: var(--cc-panel);
+}
+
+.card-crafter-job.status-running {
+    border-color: color-mix(in srgb, var(--cc-accent) 55%, transparent);
+}
+
+.card-crafter-job.status-error {
+    border-color: color-mix(in srgb, var(--cc-danger) 55%, transparent);
+}
+
+.card-crafter-job-head,
+.card-crafter-dock-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-crafter-job-head span,
+.card-crafter-dock-head span {
+    display: block;
+    color: var(--cc-muted);
+    font-size: 0.78rem;
+}
+
+.card-crafter-job-error {
+    margin: 0;
+    color: var(--cc-danger);
+}
+
+.card-crafter-stream {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 0.82rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: color-mix(in srgb, var(--cc-bg) 78%, transparent);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.card-crafter-stream.compact {
+    max-height: 120px;
+}
+
+.card-crafter-dock {
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 40060;
+    width: min(360px, calc(100vw - 24px));
+    box-shadow: var(--cc-shadow);
+}
+
 @media (min-width: 720px) {
     .card-crafter-root {
         align-items: center;

@@ -45,6 +45,8 @@ You need a working model selected in SillyTavern. If you use **Connection Manage
 3. Set creativity (0 = faithful, 100 = wild)
 4. Generate, preview, then **Import** or **Download JSON**
 
+Generation streams live in the panel. You can switch tabs, close Card Crafter, or keep chatting while it runs. A floating dock keeps the stream and a **Stop** button visible.
+
 ### Analyze
 
 Pick a character already in your SillyTavern library, or upload a `.png` / `.json` card. Card Crafter asks your current model to grade it (this can take a while). The meter is 0–100:

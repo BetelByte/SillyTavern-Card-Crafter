@@ -1,11 +1,13 @@
 import { DISPLAY_NAME, EXTENSION_NAME, GENERATION_TYPES, TABS, VERSION } from './constants.js';
 import {
-    generateCharacter,
-    generateLorebook,
-    generatePersona,
-    gradeCardWithAi,
-    remakeCharacter,
-} from './generate.js';
+    abortJob,
+    getActiveJob,
+    getLatestJob,
+    startAnalyzeJob,
+    startGenerateJob,
+    startRemakeJob,
+    subscribeJobs,
+} from './jobs.js';
 import {
     buildCharacterCardJson,
     buildWorldInfoFile,
@@ -25,7 +27,7 @@ import {
     loadLibraryCharacter,
 } from './characters.js';
 import { getConnectionProfiles, getSettings, updateSetting } from './settings.js';
-import { flattenCardForPrompt, formatAnalysisBrief, normalizeAiJudgement, normalizeCard } from './slop.js';
+import { formatAnalysisBrief, normalizeCard } from './slop.js';
 import {
     creativityLabel,
     downloadTextFile,
@@ -52,9 +54,17 @@ const state = {
     remakeResult: null,
     remakeExtra: '',
     remakeIncludeLore: true,
+    remakeCreativity: null,
+    lastExtra: '',
+    generateIncludeLore: null,
+    generateCreativity: null,
     popup: null,
     opening: false,
+    dock: null,
+    unsubscribeJobs: null,
 };
+
+ensureJobBridge();
 
 export function openCardCrafter(event) {
     event?.preventDefault?.();
@@ -76,10 +86,57 @@ export function openCardCrafter(event) {
     }, 50);
 }
 
+function ensureJobBridge() {
+    if (state.unsubscribeJobs) return;
+    state.unsubscribeJobs = subscribeJobs((job) => {
+        applyJobToState(job);
+        refreshLiveUi(job);
+        if (job.status === 'done') notifyJobDone(job);
+        if (job.status === 'error') toast('error', job.error || 'Generation failed.');
+        if (job.status === 'stopped') toast('warning', `${job.label} stopped.`);
+    });
+}
+
+function applyJobToState(job) {
+    if (job.status !== 'done' || !job.result) return;
+    if (job.kind === 'generate') {
+        state.lastResult = job.result;
+        state.lastKind = job.meta?.type || 'character';
+    }
+    if (job.kind === 'remake') {
+        state.remakeResult = job.result;
+        state.lastResult = job.result;
+        state.lastKind = 'character';
+    }
+    if (job.kind === 'analyze') {
+        state.analysis = job.result;
+    }
+}
+
+function notifyJobDone(job) {
+    if (job.kind === 'generate') toast('success', `${job.meta?.type || 'card'} drafted.`);
+    if (job.kind === 'remake') toast('success', 'Remake ready.');
+    if (job.kind === 'analyze') toast('success', 'Judgement ready.');
+}
+
+function refreshLiveUi(job) {
+    const root = document.getElementById('card-crafter-root');
+    if (root) {
+        if (job.status !== 'running') renderTab(root);
+        else paintLivePanels(root, job);
+    }
+    renderDock();
+}
+
+function currentPanelRoot() {
+    return document.getElementById('card-crafter-root');
+}
+
 function resetOpenState() {
     state.popup = null;
     state.opening = false;
     document.removeEventListener('keydown', onEscape);
+    renderDock();
 }
 
 function openWithPopup() {
@@ -91,6 +148,7 @@ function openWithPopup() {
     bindShell(root);
     renderTab(root);
 
+    renderDock();
     if (ctx?.Popup && ctx.POPUP_TYPE) {
         const popup = new ctx.Popup(root, ctx.POPUP_TYPE.DISPLAY, '', {
             large: true,
@@ -225,6 +283,108 @@ function renderTab(root) {
     if (state.tab === 'remediate') body.innerHTML = renderRemake();
     if (state.tab === 'settings') body.innerHTML = renderSettings();
     bindTab(root);
+    paintLivePanels(root);
+}
+
+function paintLivePanels(root, job) {
+    if (!root) return;
+    const generateHost = root.querySelector('#cc-generate-live');
+    if (generateHost) generateHost.innerHTML = renderJobPanel(job?.kind === 'generate' ? job : getLatestJob('generate'));
+    const analyzeHost = root.querySelector('#cc-analyze-live');
+    if (analyzeHost) analyzeHost.innerHTML = renderJobPanel(job?.kind === 'analyze' ? job : getLatestJob('analyze'));
+    const remakeHost = root.querySelector('#cc-remake-live');
+    if (remakeHost) remakeHost.innerHTML = renderJobPanel(job?.kind === 'remake' ? job : getLatestJob('remake'));
+    bindJobControls(root);
+    updateActionButtons(root);
+    root.querySelectorAll('[data-cc-stream]').forEach((el) => {
+        el.scrollTop = el.scrollHeight;
+    });
+}
+
+function updateActionButtons(root) {
+    const active = getActiveJob();
+    const generateBtn = root.querySelector('#cc-generate-btn');
+    if (generateBtn) {
+        const busy = active?.kind === 'generate';
+        setBusy(generateBtn, busy, 'Crafting…');
+    }
+    const analyzeBtn = root.querySelector('#cc-analyze-btn');
+    if (analyzeBtn) {
+        const busy = active?.kind === 'analyze';
+        setBusy(analyzeBtn, busy, 'Asking the model…');
+    }
+    const remakeBtn = root.querySelector('#cc-remake-btn');
+    if (remakeBtn) {
+        const busy = active?.kind === 'remake';
+        setBusy(remakeBtn, busy, 'Remaking…');
+    }
+}
+
+function bindJobControls(root) {
+    root.querySelectorAll('[data-cc-stop]').forEach((button) => {
+        if (button.dataset.ccBound === '1') return;
+        button.dataset.ccBound = '1';
+        button.addEventListener('click', () => {
+            abortJob(button.dataset.ccStop || undefined);
+        });
+    });
+}
+
+function jobStatusLabel(job) {
+    if (!job) return '';
+    if (job.status === 'running') return job.fallback ? 'Waiting on the model…' : 'Streaming…';
+    if (job.status === 'done') return 'Done';
+    if (job.status === 'stopped') return 'Stopped';
+    return 'Failed';
+}
+
+function renderJobPanel(job) {
+    if (!job) return '';
+    const preview = job.text || job.reasoning || (job.status === 'running' ? 'Waiting for the first tokens…' : '');
+    return `
+    <article class="card-crafter-job status-${job.status}" data-cc-job="${escapeHtml(job.id)}">
+      <header class="card-crafter-job-head">
+        <div>
+          <strong>${escapeHtml(job.label)}</strong>
+          <span>${escapeHtml(jobStatusLabel(job))}</span>
+        </div>
+        ${job.status === 'running' ? `<button type="button" class="card-crafter-ghost" data-cc-stop="${escapeHtml(job.id)}"><i class="fa-solid fa-stop"></i><span>Stop</span></button>` : ''}
+      </header>
+      ${job.error && job.status !== 'running' ? `<p class="card-crafter-job-error">${escapeHtml(job.error)}</p>` : ''}
+      ${preview ? `<pre class="card-crafter-stream" data-cc-stream>${escapeHtml(preview)}</pre>` : ''}
+    </article>
+  `;
+}
+
+function renderDock() {
+    const active = getActiveJob();
+    const existing = document.getElementById('card-crafter-dock');
+    if (!active || currentPanelRoot()) {
+        existing?.remove();
+        state.dock = null;
+        return;
+    }
+    if (!existing) {
+        const dock = document.createElement('aside');
+        dock.id = 'card-crafter-dock';
+        dock.className = 'card-crafter-dock';
+        document.body.appendChild(dock);
+        state.dock = dock;
+    }
+    const dock = document.getElementById('card-crafter-dock');
+    dock.innerHTML = `
+      <div class="card-crafter-dock-head">
+        <strong>${escapeHtml(active.label)}</strong>
+        <span>${escapeHtml(jobStatusLabel(active))}</span>
+      </div>
+      <pre class="card-crafter-stream compact">${escapeHtml(active.text || active.reasoning || 'Waiting for the first tokens…')}</pre>
+      <div class="card-crafter-actions wrap">
+        <button type="button" class="card-crafter-ghost" data-cc-stop="${escapeHtml(active.id)}"><i class="fa-solid fa-stop"></i><span>Stop</span></button>
+        <button type="button" class="card-crafter-secondary" id="cc-dock-open"><i class="fa-solid fa-up-right-from-square"></i><span>Open Card Crafter</span></button>
+      </div>
+    `;
+    dock.querySelector('[data-cc-stop]')?.addEventListener('click', () => abortJob(active.id));
+    dock.querySelector('#cc-dock-open')?.addEventListener('click', () => openCardCrafter());
 }
 
 function renderGenerate() {
@@ -246,14 +406,14 @@ function renderGenerate() {
       </label>
       <label class="card-crafter-field">
         <span>Extra direction <em>optional</em></span>
-        <textarea id="cc-extra" rows="3" placeholder="Must include a living lighthouse. No romance. Keep the prose dry."></textarea>
+        <textarea id="cc-extra" rows="3" placeholder="Must include a living lighthouse. No romance. Keep the prose dry.">${escapeHtml(state.lastExtra || '')}</textarea>
       </label>
       <label class="card-crafter-field">
-        <span>Creativity <strong id="cc-creativity-label">${settings.defaultCreativity} · ${creativityLabel(settings.defaultCreativity)}</strong></span>
-        <input type="range" id="cc-creativity" min="0" max="100" step="5" value="${settings.defaultCreativity}">
+        <span>Creativity <strong id="cc-creativity-label">${state.generateCreativity ?? settings.defaultCreativity} · ${creativityLabel(state.generateCreativity ?? settings.defaultCreativity)}</strong></span>
+        <input type="range" id="cc-creativity" min="0" max="100" step="5" value="${state.generateCreativity ?? settings.defaultCreativity}">
       </label>
       <label class="card-crafter-check" id="cc-lore-wrap">
-        <input type="checkbox" id="cc-include-lore" ${settings.autoImportLorebook ? 'checked' : ''}>
+        <input type="checkbox" id="cc-include-lore" ${(state.generateIncludeLore ?? settings.autoImportLorebook) ? 'checked' : ''}>
         <span>Also draft a lorebook if the character needs one</span>
       </label>
       <div class="card-crafter-actions">
@@ -263,6 +423,7 @@ function renderGenerate() {
         </button>
       </div>
     </form>
+    <div id="cc-generate-live"></div>
     <div id="cc-generate-result">${state.lastResult ? renderResult(state.lastResult, state.lastKind) : ''}</div>
   `;
 }
@@ -289,6 +450,7 @@ function renderAnalyze() {
         </button>
       </div>
     </div>
+    <div id="cc-analyze-live"></div>
     <div id="cc-analyze-result">${state.analysis ? renderAnalysis(state.analysis, state.uploadedCard) : ''}</div>
   `;
 }
@@ -346,8 +508,8 @@ function renderRemake() {
         <textarea id="cc-remake-extra" rows="4" placeholder="Keep the name. Cut the harem bait. Make her a competent cartographer.">${escapeHtml(state.remakeExtra || '')}</textarea>
       </label>
       <label class="card-crafter-field">
-        <span>Creativity <strong id="cc-remake-creativity-label">${settings.defaultCreativity} · ${creativityLabel(settings.defaultCreativity)}</strong></span>
-        <input type="range" id="cc-remake-creativity" min="0" max="100" step="5" value="${settings.defaultCreativity}">
+        <span>Creativity <strong id="cc-remake-creativity-label">${state.remakeCreativity ?? settings.defaultCreativity} · ${creativityLabel(state.remakeCreativity ?? settings.defaultCreativity)}</strong></span>
+        <input type="range" id="cc-remake-creativity" min="0" max="100" step="5" value="${state.remakeCreativity ?? settings.defaultCreativity}">
       </label>
       <label class="card-crafter-check">
         <input type="checkbox" id="cc-remake-lore" ${state.remakeIncludeLore ? 'checked' : ''}>
@@ -360,6 +522,7 @@ function renderRemake() {
         </button>
       </div>
     </div>
+    <div id="cc-remake-live"></div>
     <div id="cc-remake-result">${state.remakeResult ? renderResult(state.remakeResult, 'character') : ''}</div>
   `;
 }
@@ -670,10 +833,20 @@ function bindGenerate(root) {
     const slider = root.querySelector('#cc-creativity');
     const label = root.querySelector('#cc-creativity-label');
     slider?.addEventListener('input', () => {
+        state.generateCreativity = Number(slider.value);
         label.textContent = `${slider.value} · ${creativityLabel(slider.value)}`;
     });
+    root.querySelector('#cc-concept')?.addEventListener('input', (event) => {
+        state.lastConcept = event.currentTarget.value;
+    });
+    root.querySelector('#cc-extra')?.addEventListener('input', (event) => {
+        state.lastExtra = event.currentTarget.value;
+    });
+    root.querySelector('#cc-include-lore')?.addEventListener('change', (event) => {
+        state.generateIncludeLore = Boolean(event.currentTarget.checked);
+    });
 
-    root.querySelector('#cc-generate-form')?.addEventListener('submit', async (event) => {
+    root.querySelector('#cc-generate-form')?.addEventListener('submit', (event) => {
         event.preventDefault();
         const concept = root.querySelector('#cc-concept').value.trim();
         if (!concept) {
@@ -683,29 +856,18 @@ function bindGenerate(root) {
         const extra = root.querySelector('#cc-extra').value.trim();
         const creativity = Number(slider.value);
         const includeLorebook = Boolean(root.querySelector('#cc-include-lore')?.checked);
-        const btn = root.querySelector('#cc-generate-btn');
         state.lastConcept = concept;
-        try {
-            setBusy(btn, true, 'Crafting…');
-            let result;
-            if (state.genType === 'lorebook') {
-                result = await generateLorebook({ concept, creativity, extra });
-            } else if (state.genType === 'persona') {
-                result = await generatePersona({ concept, creativity, extra });
-            } else {
-                result = await generateCharacter({ concept, creativity, extra, includeLorebook });
-            }
-            state.lastResult = result;
-            state.lastKind = state.genType;
-            root.querySelector('#cc-generate-result').innerHTML = renderResult(result, state.genType);
-            bindShared(root);
-            toast('success', `${state.genType} drafted.`);
-        } catch (error) {
-            console.error(error);
-            toast('error', error.message || String(error));
-        } finally {
-            setBusy(btn, false);
-        }
+        state.lastExtra = extra;
+        state.generateCreativity = creativity;
+        state.generateIncludeLore = includeLorebook;
+        startGenerateJob({
+            type: state.genType,
+            concept,
+            extra,
+            creativity,
+            includeLorebook,
+        });
+        toast('info', 'Generation started. You can switch tabs or keep chatting.');
     });
 }
 
@@ -759,8 +921,7 @@ function bindAnalyze(root) {
         const file = event.target.files?.[0];
         if (file) await ingestCard(file, root);
     });
-    root.querySelector('#cc-analyze-btn')?.addEventListener('click', async (event) => {
-        const btn = event.currentTarget;
+    root.querySelector('#cc-analyze-btn')?.addEventListener('click', async () => {
         try {
             const pasted = root.querySelector('#cc-paste').value.trim();
             if (pasted) {
@@ -769,16 +930,13 @@ function bindAnalyze(root) {
             }
             const card = await ensureCardLoaded(root);
             if (!card) return;
-            setBusy(btn, true, 'Asking the model…');
-            const settings = getSettings();
-            const judgement = await gradeCardWithAi(flattenCardForPrompt(card));
-            state.analysis = normalizeAiJudgement(judgement, { threshold: settings.slopThreshold });
-            root.querySelector('#cc-analyze-result').innerHTML = renderAnalysis(state.analysis, state.uploadedCard);
-            bindShared(root);
+            startAnalyzeJob({
+                card,
+                threshold: getSettings().slopThreshold,
+            });
+            toast('info', 'Judging started. You can switch tabs or keep chatting.');
         } catch (error) {
             toast('error', error.message || String(error));
-        } finally {
-            setBusy(btn, false);
         }
     });
 }
@@ -788,6 +946,7 @@ function bindRemake(root) {
     const slider = root.querySelector('#cc-remake-creativity');
     const label = root.querySelector('#cc-remake-creativity-label');
     slider?.addEventListener('input', () => {
+        state.remakeCreativity = Number(slider.value);
         label.textContent = `${slider.value} · ${creativityLabel(slider.value)}`;
     });
     root.querySelector('#cc-remake-extra')?.addEventListener('input', (event) => {
@@ -803,34 +962,27 @@ function bindRemake(root) {
             renderTab(root);
         }
     });
-    root.querySelector('#cc-remake-btn')?.addEventListener('click', async (event) => {
-        const btn = event.currentTarget;
+    root.querySelector('#cc-remake-btn')?.addEventListener('click', async () => {
         try {
             const card = await ensureCardLoaded(root);
             if (!card) return;
             const extra = root.querySelector('#cc-remake-extra')?.value.trim() || '';
             const includeLorebook = Boolean(root.querySelector('#cc-remake-lore')?.checked);
+            const creativity = Number(slider?.value ?? getSettings().defaultCreativity);
             state.remakeExtra = extra;
             state.remakeIncludeLore = includeLorebook;
-            setBusy(btn, true, 'Remaking…');
-            const result = await remakeCharacter({
-                cardText: flattenCardForPrompt(card),
-                creativity: Number(slider?.value ?? getSettings().defaultCreativity),
+            state.remakeCreativity = creativity;
+            startRemakeJob({
+                card,
                 extra,
                 critique: formatAnalysisBrief(state.analysis),
+                creativity,
                 includeLorebook,
             });
-            state.remakeResult = result;
-            state.lastResult = result;
-            state.lastKind = 'character';
-            root.querySelector('#cc-remake-result').innerHTML = renderResult(result, 'character');
-            bindShared(root);
-            toast('success', 'Remake ready.');
+            toast('info', 'Remake started. You can switch tabs or keep chatting.');
         } catch (error) {
             console.error('[Card Crafter] Remake failed', error);
             toast('error', error.message || String(error));
-        } finally {
-            setBusy(btn, false);
         }
     });
 }

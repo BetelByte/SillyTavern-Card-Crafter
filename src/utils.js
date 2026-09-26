@@ -301,15 +301,19 @@ export function toast(type, message, title = 'Card Crafter') {
 export function setBusy(button, busy, busyText = 'Working…') {
     if (!button) return;
     if (busy) {
-        button.dataset.originalHtml = button.innerHTML;
+        if (!button.dataset.originalHtml) {
+            button.dataset.originalHtml = button.innerHTML;
+        }
         button.disabled = true;
         button.classList.add('disabled');
-        button.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>${escapeHtml(busyText)}</span>`;
-    } else {
-        button.disabled = false;
-        button.classList.remove('disabled');
-        if (button.dataset.originalHtml) {
-            button.innerHTML = button.dataset.originalHtml;
-        }
+        const next = `<i class="fa-solid fa-spinner fa-spin"></i><span>${escapeHtml(busyText)}</span>`;
+        if (button.innerHTML !== next) button.innerHTML = next;
+        return;
+    }
+    button.disabled = false;
+    button.classList.remove('disabled');
+    if (button.dataset.originalHtml) {
+        button.innerHTML = button.dataset.originalHtml;
+        delete button.dataset.originalHtml;
     }
 }
