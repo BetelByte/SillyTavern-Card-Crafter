@@ -148,20 +148,28 @@ export async function readPngCard(file) {
                 if (keyword === 'chara' || keyword === 'ccv3') {
                     let payload = bytes.subarray(keywordEnd + 1, dataEnd);
                     if (type === 'zTXt') {
-                        throw new Error('Compressed PNG card chunks are not supported in the browser. Export the card as JSON instead.');
+                        const method = payload[0];
+                        if (method !== 0) {
+                            throw new Error('Unsupported PNG compression method. Export the card as JSON instead.');
+                        }
+                        payload = await inflateBytes(payload.subarray(1));
                     }
                     if (type === 'iTXt') {
                         // iTXt: keyword\0 compressionFlag compressionMethod language\0 translated\0 text
                         payload = bytes.subarray(keywordEnd + 1, dataEnd);
                         const compressionFlag = payload[0];
-                        if (compressionFlag) {
-                            throw new Error('Compressed iTXt card chunks are not supported. Export the card as JSON instead.');
-                        }
+                        const method = payload[1];
                         let cursor = 2;
                         while (cursor < payload.length && payload[cursor] !== 0) cursor += 1;
                         cursor += 1;
                         while (cursor < payload.length && payload[cursor] !== 0) cursor += 1;
                         payload = payload.subarray(cursor + 1);
+                        if (compressionFlag) {
+                            if (method !== 0) {
+                                throw new Error('Unsupported PNG compression method. Export the card as JSON instead.');
+                            }
+                            payload = await inflateBytes(payload);
+                        }
                     }
                     const b64 = new TextDecoder('utf-8').decode(payload);
                     const json = atob(b64);
@@ -179,6 +187,15 @@ export async function readPngCard(file) {
 
 function readUint32(bytes, offset) {
     return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+}
+
+async function inflateBytes(bytes) {
+    if (typeof DecompressionStream !== 'function') {
+        throw new Error('This browser cannot inflate compressed PNG card chunks. Export the card as JSON instead.');
+    }
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+    const buffer = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buffer);
 }
 
 export function sanitizeFileName(name) {

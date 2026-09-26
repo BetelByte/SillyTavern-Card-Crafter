@@ -6,10 +6,15 @@ export function getContext() {
 
 export function getSettings() {
     const ctx = getContext();
-    if (!ctx.extensionSettings[MODULE_NAME]) {
+    const current = ctx.extensionSettings[MODULE_NAME];
+    if (!current || typeof current !== 'object') {
         ctx.extensionSettings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
+        return ctx.extensionSettings[MODULE_NAME];
     }
-    return ctx.extensionSettings[MODULE_NAME];
+    for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+        if (current[key] === undefined) current[key] = value;
+    }
+    return current;
 }
 
 export function saveSettings() {

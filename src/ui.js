@@ -8,6 +8,7 @@ import {
 } from './generate.js';
 import {
     buildCharacterCardJson,
+    buildWorldInfoFile,
     describeImport,
     importCharacterToSillyTavern,
     importLorebookToSillyTavern,
@@ -24,12 +25,11 @@ import {
     loadLibraryCharacter,
 } from './characters.js';
 import { getConnectionProfiles, getSettings, updateSetting } from './settings.js';
-import { analyzeSlop, flattenCardForPrompt, normalizeCard } from './slop.js';
+import { flattenCardForPrompt, normalizeAiJudgement, normalizeCard } from './slop.js';
 import {
     creativityLabel,
     downloadTextFile,
     escapeHtml,
-    nowStamp,
     readFileAsText,
     readPngCard,
     sanitizeFileName,
@@ -57,6 +57,7 @@ const state = {
 export function openCardCrafter(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
     if (state.opening || state.popup) return;
     if (document.getElementById('card-crafter-root')) return;
 
@@ -66,11 +67,17 @@ export function openCardCrafter(event) {
         try {
             openWithPopup();
         } catch (error) {
-            state.opening = false;
+            resetOpenState();
             console.error('[Card Crafter] Failed to open panel', error);
             toast('error', error.message || 'Could not open Card Crafter.');
         }
-    }, 30);
+    }, 50);
+}
+
+function resetOpenState() {
+    state.popup = null;
+    state.opening = false;
+    document.removeEventListener('keydown', onEscape);
 }
 
 function openWithPopup() {
@@ -90,14 +97,13 @@ function openWithPopup() {
             leftAlign: true,
             animation: 'fast',
             onClose: () => {
-                state.popup = null;
-                state.opening = false;
+                resetOpenState();
             },
         });
         state.popup = popup;
+        document.addEventListener('keydown', onEscape);
         popup.show().catch((error) => {
-            state.popup = null;
-            state.opening = false;
+            resetOpenState();
             console.error('[Card Crafter] Popup failed', error);
             toast('error', error.message || 'Could not open Card Crafter.');
         });
@@ -105,28 +111,25 @@ function openWithPopup() {
     }
 
     openFallback(root);
-    state.opening = false;
 }
 
 function openFallback(root) {
     root.classList.add('card-crafter-root', 'is-open');
-    const host = document.body;
-    host.appendChild(root);
-    bindShell(root);
-    renderTab(root);
+    document.body.appendChild(root);
     document.addEventListener('keydown', onEscape);
+    state.opening = false;
 }
 
 export function closeCardCrafter() {
     if (state.popup) {
-        state.popup.completeCancelled?.() || state.popup.dlg?.close?.();
-        state.popup = null;
-        state.opening = false;
+        const popup = state.popup;
+        resetOpenState();
+        popup.completeCancelled?.() || popup.dlg?.close?.();
         return;
     }
     const root = document.getElementById('card-crafter-root');
+    resetOpenState();
     if (!root) return;
-    document.removeEventListener('keydown', onEscape);
     root.classList.remove('is-open');
     root.remove();
 }
@@ -178,7 +181,6 @@ function bindShell(root) {
             renderTab(root);
         });
     });
-    document.addEventListener('keydown', onEscape);
 }
 
 function onEscape(event) {
@@ -240,7 +242,7 @@ function renderGenerate() {
 function renderAnalyze() {
     return `
     <div class="card-crafter-form">
-      <p class="card-crafter-lead">Pick a character already in SillyTavern, or upload a PNG / JSON card. The slop-o-meter scores formatting, completeness, cliches, and filler. Higher is sloppier.</p>
+      <p class="card-crafter-lead">Pick a character already in SillyTavern, or upload a PNG / JSON card. Card Crafter asks your current model to grade it. This can take a while. Higher is sloppier.</p>
       ${renderLibraryPicker('cc-library')}
       <label class="card-crafter-drop" id="cc-drop">
         <input type="file" id="cc-file" accept=".png,.json,application/json,image/png">
@@ -255,7 +257,7 @@ function renderAnalyze() {
       <div class="card-crafter-actions">
         <button type="button" class="card-crafter-primary" id="cc-analyze-btn">
           <i class="fa-solid fa-gauge-high"></i>
-          <span>Run slop-o-meter</span>
+          <span>Ask the model</span>
         </button>
       </div>
     </div>
@@ -358,10 +360,6 @@ function renderSettings() {
         <input type="number" id="cc-max-tokens" min="800" max="8000" step="100" value="${settings.maxResponseTokens}">
       </label>
       <label class="card-crafter-check">
-        <input type="checkbox" id="cc-ai-slop" ${settings.enableAiSlopAnalysis ? 'checked' : ''}>
-        <span>Blend in an extra AI judge when analyzing (slower, uses tokens)</span>
-      </label>
-      <label class="card-crafter-check">
         <input type="checkbox" id="cc-auto-lore" ${settings.autoImportLorebook ? 'checked' : ''}>
         <span>Default to drafting a lorebook with characters</span>
       </label>
@@ -384,8 +382,6 @@ function renderResult(raw, kind) {
 
 function renderCharacterResult(raw) {
     const payload = toCharacterPayload(raw);
-    const analysis = analyzeSlop(payload, { threshold: getSettings().slopThreshold });
-    const band = slopBand(analysis.score);
     const loreCount = (payload.lorebook || []).length;
     return `
     <article class="card-crafter-result">
@@ -394,7 +390,6 @@ function renderCharacterResult(raw) {
           <h3>${escapeHtml(payload.name)}</h3>
           <p>${wordCount(payload.description)}w description · ${wordCount(payload.first_mes)}w greeting${loreCount ? ` · ${loreCount} lore entries` : ''}</p>
         </div>
-        ${renderMeter(analysis.score, band)}
       </header>
       ${renderFieldPreview('Description', payload.description)}
       ${renderFieldPreview('Personality', payload.personality)}
@@ -498,19 +493,18 @@ function renderAnalysis(analysis, card) {
       <header class="card-crafter-result-head">
         <div>
           <h3>${escapeHtml(data.name || state.uploadedName || 'Uploaded card')}</h3>
-          <p>${analysis.isSlop ? 'Flagged as slop' : 'Below the slop line'} · threshold ${getSettings().slopThreshold}</p>
+          <p>${analysis.isSlop ? 'Flagged as slop' : 'Below the slop line'} · AI judge · threshold ${getSettings().slopThreshold}</p>
         </div>
         ${renderMeter(analysis.score, band)}
       </header>
-      <p class="card-crafter-lead">${escapeHtml(band.hint)}</p>
-      <div class="card-crafter-bars">
+      <p class="card-crafter-lead">${escapeHtml(analysis.aiSummary || band.hint)}</p>
+      ${hasBreakdown(analysis.breakdown) ? `<div class="card-crafter-bars">
         ${renderBar('Cliches', analysis.breakdown.creativity)}
         ${renderBar('Completeness', analysis.breakdown.completeness)}
         ${renderBar('Formatting', analysis.breakdown.formatting)}
         ${renderBar('Repetition', analysis.breakdown.repetition)}
         ${renderBar('Bloat', analysis.breakdown.tokenEfficiency)}
-      </div>
-      ${analysis.aiSummary ? `<p class="card-crafter-lead">${escapeHtml(analysis.aiSummary)}</p>` : ''}
+      </div>` : ''}
       <ul class="card-crafter-issues">
         ${analysis.issues.map((issue) => `
           <li class="sev-${issue.severity}">
@@ -530,6 +524,11 @@ function renderAnalysis(analysis, card) {
       </div>
     </article>
   `;
+}
+
+function hasBreakdown(breakdown) {
+    if (!breakdown) return false;
+    return Object.values(breakdown).some((value) => Number(value) > 0);
 }
 
 function renderBar(label, value) {
@@ -587,7 +586,8 @@ function bindShared(root) {
     });
     root.querySelector('[data-cc-download-lore]')?.addEventListener('click', () => {
         const book = toLorebookPayload(state.lastResult);
-        downloadTextFile(`${sanitizeFileName(book.name || 'lorebook')}.json`, JSON.stringify(book, null, 2));
+        const file = buildWorldInfoFile(book);
+        downloadTextFile(`${sanitizeFileName(book.name || 'lorebook')}.json`, JSON.stringify(file, null, 2));
     });
     root.querySelector('[data-cc-import-persona]')?.addEventListener('click', async (event) => {
         const btn = event.currentTarget;
@@ -739,18 +739,10 @@ function bindAnalyze(root) {
                 toast('warning', 'Upload or paste a card first.');
                 return;
             }
-            setBusy(btn, true, 'Scoring…');
+            setBusy(btn, true, 'Asking the model…');
             const settings = getSettings();
-            let ai = null;
-            if (settings.enableAiSlopAnalysis) {
-                try {
-                    ai = await gradeCardWithAi(flattenCardForPrompt(state.uploadedCard));
-                } catch (error) {
-                    console.warn('[Card Crafter] AI slop pass failed.', error);
-                    toast('warning', 'Heuristic score only — AI judge failed.');
-                }
-            }
-            state.analysis = analyzeSlop(state.uploadedCard, { threshold: settings.slopThreshold, ai });
+            const judgement = await gradeCardWithAi(flattenCardForPrompt(state.uploadedCard));
+            state.analysis = normalizeAiJudgement(judgement, { threshold: settings.slopThreshold });
             root.querySelector('#cc-analyze-result').innerHTML = renderAnalysis(state.analysis, state.uploadedCard);
             bindShared(root);
         } catch (error) {
@@ -821,7 +813,6 @@ function bindSettings(root) {
         updateSetting('slopThreshold', Number(threshold.value));
         updateSetting('defaultCreativity', Number(creativity.value));
         updateSetting('maxResponseTokens', Number(root.querySelector('#cc-max-tokens').value) || 3500);
-        updateSetting('enableAiSlopAnalysis', root.querySelector('#cc-ai-slop').checked);
         updateSetting('autoImportLorebook', root.querySelector('#cc-auto-lore').checked);
         toast('success', 'Settings saved.');
     });

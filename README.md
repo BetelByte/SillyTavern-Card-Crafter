@@ -8,7 +8,7 @@ A mobile-first SillyTavern extension that turns a concept into a character card,
 
 - **Generate** — describe a character, setting, or user persona. Card Crafter asks your current SillyTavern model for a structured V2 card, a world-info book, or a persona.
 - **Lorebook when needed** — character generation can draft keyed world-info entries and import them with the card.
-- **Slop-o-meter** — upload a PNG tavern card or JSON. Higher score = sloppier. It flags cliches, mashed fields, jailbreak leftovers, empty mystery, repetition, and missing pieces.
+- **Slop-o-meter** — pick a library card or upload a PNG / JSON. Your current SillyTavern model grades it. Higher score = sloppier. It flags cliches, mashed fields, jailbreak leftovers, empty mystery, repetition, and missing pieces.
 - **Remake** — keep the soul of the character, rewrite the slop, optionally build a proper lorebook. Creativity is a slider, not a vibe.
 - **Import or download** — push the result into SillyTavern, or save JSON.
 
@@ -47,7 +47,7 @@ You need a working model selected in SillyTavern. If you use **Connection Manage
 
 ### Analyze
 
-Pick a character already in your SillyTavern library, or upload a `.png` / `.json` card. The meter is 0–100:
+Pick a character already in your SillyTavern library, or upload a `.png` / `.json` card. Card Crafter asks your current model to grade it (this can take a while). The meter is 0–100:
 
 | Score | Band |
 | --- | --- |
@@ -57,7 +57,7 @@ Pick a character already in your SillyTavern library, or upload a `.png` / `.jso
 | 65–79 | Slop |
 | 80–100 | Toxic slop |
 
-Optional: turn on **Blend in an extra AI judge** in settings. That spends tokens and mixes the model’s grade with the heuristic.
+Analyze is AI-only. It uses tokens and waits on the model. There is no local heuristic fallback.
 
 ### Remake
 
@@ -71,13 +71,12 @@ Select the character from your library (or upload a card), say what to keep or c
 - Default creativity
 - Max response tokens
 - Auto-draft lorebook with characters
-- Optional AI slop judge
 
 ## Notes
 
 - No extra API key. It uses the model SillyTavern already has selected.
 - Personas are imported as user personas, not bot cards.
-- PNG read support is for standard tavern `chara` chunks. Compressed chunks should be exported as JSON first.
+- PNG read support is for standard tavern `chara` / `ccv3` chunks, including compressed `zTXt` / `iTXt` when the browser can inflate them.
 - This is not a jailbreak tool and it will not write one into your cards.
 
 ## Development

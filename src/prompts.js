@@ -189,18 +189,41 @@ JSON shape:
 }
 
 export function buildAiSlopPrompt(cardText) {
-    return `You grade SillyTavern character cards for slop. Slop means cliche prose, mashed fields, jailbreak leftovers, empty mystery, synonym salad, and unplayable structure.
+    return `You are a harsh but fair SillyTavern card editor. Grade this character card for slop.
 
-Return ONLY JSON:
+Slop means: cliche prose, mashed fields, jailbreak leftovers, empty mystery, synonym salad, unplayable structure, missing fields, and filler that wastes context.
+
+Hard rules:
+- Return ONLY valid JSON. No markdown fences, no commentary, no preamble.
+- score is 0-100. Higher = sloppier. 0 is a tight playable card. 100 is sludge.
+- Be specific. Quote the card. Do not invent fields that are not there.
+- Empty or stub fields are serious. Identical description/personality is serious.
+- Do not reward length. Reward playable, concrete detail.
+
+JSON shape:
 {
   "score": 0,
-  "summary": "",
-  "issues": [""],
-  "fixes": [""]
+  "summary": "2-4 sentences. What this card is, and why the score is what it is.",
+  "breakdown": {
+    "cliches": 0,
+    "completeness": 0,
+    "formatting": 0,
+    "repetition": 0,
+    "bloat": 0
+  },
+  "issues": [
+    {
+      "type": "cliches|completeness|formatting|repetition|bloat|jailbreak|voice",
+      "severity": "critical|high|medium|low",
+      "description": "What is wrong, with a short quote.",
+      "suggestion": "How to fix it."
+    }
+  ],
+  "recommendations": ["Highest-leverage rewrite steps."]
 }
 
-score is 0-100. Higher = sloppier.
-Be harsh but specific. Quote the problem, do not invent fields that are not there.
+breakdown values are 0-100. Higher = worse on that axis.
+Give 3-8 issues. Give 2-5 recommendations.
 
 Card:
 ${cardText}`;

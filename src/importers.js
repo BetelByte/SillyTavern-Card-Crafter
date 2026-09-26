@@ -58,7 +58,38 @@ export function toPersonaPayload(raw) {
     };
 }
 
+export function buildCharacterBook(lorebook, name = '') {
+    const book = toLorebookPayload(lorebook, name || 'Lorebook');
+    if (!book.entries.length) return undefined;
+    return {
+        name: book.name || name || 'Lorebook',
+        description: book.description || '',
+        scan_depth: 4,
+        token_budget: 512,
+        recursive_scanning: false,
+        extensions: {},
+        entries: book.entries.map((entry, index) => {
+            const keys = uniqueStrings(entry.keys || entry.key || []);
+            return {
+                id: Number.isInteger(entry.uid) ? entry.uid : index,
+                keys,
+                secondary_keys: uniqueStrings(entry.secondary_keys || entry.keysecondary || []),
+                comment: entry.comment || entry.name || `Entry ${index}`,
+                content: entry.content || '',
+                constant: Boolean(entry.constant),
+                selective: true,
+                insertion_order: Number.isFinite(Number(entry.insertion_order ?? entry.order)) ? Number(entry.insertion_order ?? entry.order) : 100,
+                enabled: entry.enabled !== false && entry.disable !== true,
+                position: 'before_char',
+                use_regex: false,
+                extensions: {},
+            };
+        }),
+    };
+}
+
 export function buildCharacterCardJson(payload) {
+    const characterBook = payload.character_book || buildCharacterBook(payload.lorebook, `${payload.name || 'Character'} Lore`);
     return {
         spec: 'chara_card_v2',
         spec_version: '2.0',
@@ -86,7 +117,7 @@ export function buildCharacterCardJson(payload) {
                     role: 'system',
                 },
             },
-            character_book: payload.world ? undefined : undefined,
+            character_book: characterBook,
         },
     };
 }
