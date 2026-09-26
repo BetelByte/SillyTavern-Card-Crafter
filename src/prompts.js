@@ -1,17 +1,22 @@
+import { getDetailPreset } from './constants.js';
 import { creativityLabel } from './utils.js';
 
-const SHARED_RULES = `You are a senior SillyTavern cardwright. You write character cards, lorebooks, and personas that are actually usable in play.
+const SHARED_RULES = `You are a senior SillyTavern cardwright. You write one requested piece at a time.
 
 Hard rules:
 - Return ONLY valid JSON. No markdown fences, no commentary, no preamble.
 - Never write "as an AI", jailbreak text, or notes addressed to the model.
-- Do not dump appearance, personality, backstory, and scenario into one blob.
+- Do not dump later fields into this answer. Write ONLY the requested field.
 - Prefer concrete, playable detail over aesthetic adjectives.
 - Avoid slop: glowing orbs, lingering scents, smirk playing on lips, porcelain/alabaster skin, "can't help but", "aura of", "defies description", "not like other girls", "touch her and you die", "dominant yet submissive", tragic-mystery-with-no-content, and synonym salad.
 - Do not sexualize a character unless the user explicitly asked for adult content.
 - Use {{char}} and {{user}} macros where they help the model stay consistent.
-- Keep tokens tight. Every sentence should earn its place.
-- If the user's concept is thin, invent supporting detail that still matches the request. Do not invent a different concept.`;
+- Stay loyal to the original concept. Already-written fields are locked unless this step is a remake of that same field.`;
+
+function resolveDetail(detail) {
+    if (detail && typeof detail === 'object' && detail.id) return detail;
+    return getDetailPreset(detail);
+}
 
 function creativityBlock(level) {
     const n = Number(level) || 45;
@@ -23,46 +28,114 @@ function creativityBlock(level) {
 - 81-100: surprise the user, but do not abandon the core concept.`;
 }
 
-export function buildCharacterPrompt({ concept, creativity, extra = '', includeLorebook = false }) {
-    return `${SHARED_RULES}
+const STACK_FIELDS = [
+    ['name', 'Name'],
+    ['title', 'Title'],
+    ['description', 'Description'],
+    ['personality', 'Personality'],
+    ['scenario', 'Scenario'],
+    ['first_mes', 'First message'],
+    ['mes_example', 'Example messages'],
+    ['alternate_greetings', 'Alternate greetings'],
+    ['system_prompt', 'System prompt'],
+    ['post_history_instructions', 'Post-history instructions'],
+    ['creator_notes', 'Creator notes'],
+    ['tags', 'Tags'],
+    ['talkativeness', 'Talkativeness'],
+    ['depth_prompt', 'Depth prompt'],
+    ['creator', 'Creator'],
+];
 
-${creativityBlock(creativity)}
+function hasValue(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).length > 0;
+    if (typeof value === 'number') return Number.isFinite(value);
+    return Boolean(String(value ?? '').trim());
+}
 
-Task: build a SillyTavern Character Card V2 from the user's concept.
+function printValue(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).join('\n---\n');
+    if (typeof value === 'number') return String(value);
+    return String(value ?? '').trim();
+}
 
-Field guidance:
-- name: a real usable name, not a title dump.
-- description: 120-260 words. Physical presence, how they occupy space, what a stranger would notice, one or two telling details. No personality essay here.
-- personality: 80-180 words. Motivations, social style, hard lines, how they treat {{user}}. Use contradictions that can actually play, not "kind but deadly".
-- scenario: 40-120 words. Where we are, why {{user}} is here, the current tension. Write it as the opening situation, not a novel.
-- first_mes: 80-180 words. In-character opening. Ground it in a place and an action. End on something {{user}} can answer. No "who are you traveler" unless that is the joke.
-- mes_example: 2-4 short exchanges using this format:
-  {{user}}: ...
-  {{char}}: ...
-  Show voice, not plot recap.
-- alternate_greetings: 2-3 alternate first messages from different beats or moods.
-- system_prompt: optional short director's note for the model. Empty string if unnecessary.
-- post_history_instructions: 1-3 sentences about formatting, length, and what never to do. Empty string if unnecessary.
-- creator_notes: out-of-character usage notes for the human, not the model. Mention intended tone, any lore assumptions, and what the card is NOT.
-- tags: 4-10 short tags.
-- talkativeness: 0.2-0.9.
-- depth_prompt: a short in-world reminder inserted at depth, or empty.
-${includeLorebook ? `- lorebook: 4-10 world-info entries the card actually needs (people, places, rules, items). Skip cosmetic entries.
-  Each entry: comment (short title), keys (3-8 trigger phrases), content (40-120 words, third person, no "you"), constant (true only for always-on framing), insertion_order (lower = earlier).` : '- lorebook: always return an empty array.'}
+export function buildPromptStack({ concept = '', extra = '', critique = '', draft = {}, sourceCard = '', mode = 'generate' } = {}) {
+    const parts = [];
+    if (mode === 'remake') {
+        parts.push('Mode: remake. Keep the soul of the source card unless the user asked to change it.');
+        parts.push('Priority: user extra direction, then analyzer critique, then recognizability.');
+    } else {
+        parts.push('Mode: generate from a concept. Invent supporting detail if the concept is thin. Do not invent a different concept.');
+    }
+    parts.push(`CONCEPT:\n${concept || '(none given)'}`);
+    if (extra) parts.push(`EXTRA DIRECTION:\n${extra}`);
+    if (critique) parts.push(`ANALYZER CRITIQUE:\n${critique}`);
+    if (mode === 'remake' && sourceCard) {
+        parts.push(`ORIGINAL CARD BEING REMADE:\n${sourceCard}`);
+    }
+    const stacked = STACK_FIELDS.filter(([key]) => hasValue(draft?.[key]));
+    if (stacked.length) {
+        parts.push(['ALREADY BUILT — treat this as locked context:', ...stacked.map(([key, label]) => `${label}:\n${printValue(draft[key])}`)].join('\n\n'));
+    } else {
+        parts.push('ALREADY BUILT: nothing yet. This is the first field.');
+    }
+    return parts.join('\n\n');
+}
 
-User concept:
-${concept}
-${extra ? `\nAdditional direction:\n${extra}` : ''}
+export function formatWholeCard(card) {
+    if (!card) return '(no card)';
+    if (typeof card === 'string') return card;
+    const rows = STACK_FIELDS.filter(([key]) => hasValue(card[key]));
+    if (!rows.length) return JSON.stringify(card, null, 2);
+    return rows.map(([key, label]) => `${label}:\n${printValue(card[key])}`).join('\n\n');
+}
 
-JSON shape:
-{
-  "name": "",
-  "description": "",
-  "personality": "",
-  "scenario": "",
-  "first_mes": "",
-  "mes_example": "",
-  "alternate_greetings": [""],
+const FIELD_GUIDE = {
+    name: {
+        purpose: 'NAME is the playable character label. It is what the user picks in the character list and what {{char}} refers to.',
+        instruction: 'Write one usable personal name. Not a title dump, not a job plus three adjectives, not "X the Y of Z" unless that is truly the name.',
+        shape: '{ "name": "" }',
+        words: () => '1-5 words',
+    },
+    description: {
+        purpose: 'DESCRIPTION is what a stranger would notice in the room. Body, clothes, posture, tells, how they occupy space. It is NOT personality, backstory, or scenario.',
+        instruction: 'Write only physical presence and immediately visible facts. No motives. No life story. No "she is kind but deadly".',
+        shape: '{ "description": "" }',
+        words: (preset) => preset.descriptionWords,
+    },
+    personality: {
+        purpose: 'PERSONALITY is how they choose. Motives, social style, hard lines, how they treat {{user}}. It is NOT appearance and not the opening scene.',
+        instruction: 'Write playable contradictions, not "kind but deadly". Stay consistent with the locked description.',
+        shape: '{ "personality": "" }',
+        words: (preset) => preset.personalityWords,
+    },
+    scenario: {
+        purpose: 'SCENARIO is the opening situation: where we are, why {{user}} is here, the current tension. It is not a novel and not a biography.',
+        instruction: 'Write the starting scene only. Do not recap the description or personality.',
+        shape: '{ "scenario": "" }',
+        words: (preset) => preset.scenarioWords,
+    },
+    first_mes: {
+        purpose: 'FIRST MESSAGE is the in-character opening the model will send as {{char}}. It must be answerable.',
+        instruction: 'Ground it in a place and an action. End on something {{user}} can answer. No "who are you traveler" unless that is the joke.',
+        shape: '{ "first_mes": "" }',
+        words: (preset) => preset.greetingWords,
+    },
+    mes_example: {
+        purpose: 'EXAMPLE MESSAGES teach the model the character\'s voice. They are a short transcript, not a plot recap.',
+        instruction: 'Use this format only:\n{{user}}: ...\n{{char}}: ...\nShow voice, not story.',
+        shape: '{ "mes_example": "" }',
+        words: (preset) => `${preset.exampleTurns} short exchanges`,
+    },
+    alternate_greetings: {
+        purpose: 'ALTERNATE GREETINGS are extra first messages from different beats or moods. They are swipe options, not more personality text.',
+        instruction: 'Each item is a full in-character opening, distinct from first_mes and from each other. Empty array only on Sketch if you truly have nothing extra.',
+        shape: '{ "alternate_greetings": [""] }',
+        words: (preset) => `${preset.altGreetings} greetings`,
+    },
+    extras: {
+        purpose: 'DIRECTOR NOTES are optional machine/human instructions. They are not more lore and not more personality.',
+        instruction: 'Fill only what helps. Use empty strings / empty arrays when a field is unnecessary.\n- system_prompt: short director note for the model\n- post_history_instructions: 1-3 sentences about formatting, length, and what never to do\n- creator_notes: out-of-character notes for the human\n- tags: 4-10 short tags\n- talkativeness: 0.2-0.9\n- depth_prompt: short in-world reminder, or empty\n- creator: leave empty unless the user named one',
+        shape: `{
   "system_prompt": "",
   "post_history_instructions": "",
   "creator_notes": "",
@@ -70,37 +143,79 @@ JSON shape:
   "creator": "",
   "character_version": "1.0",
   "talkativeness": 0.5,
-  "depth_prompt": "",
-  "lorebook": [
-    {
-      "comment": "",
-      "keys": [""],
-      "content": "",
-      "constant": false,
-      "insertion_order": 100
-    }
-  ]
-}`;
-}
+  "depth_prompt": ""
+}`,
+        words: () => 'keep short',
+    },
+    title: {
+        purpose: 'TITLE is the short label shown in the persona list. It is not the persona name.',
+        instruction: 'A few words, or an empty string.',
+        shape: '{ "title": "" }',
+        words: () => '0-6 words',
+    },
+};
 
-export function buildLorebookPrompt({ concept, creativity, extra = '' }) {
+export function buildFieldPrompt({
+    field,
+    concept,
+    extra = '',
+    critique = '',
+    sourceCard = '',
+    draft = {},
+    creativity,
+    detail = 'standard',
+    mode = 'generate',
+} = {}) {
+    const preset = resolveDetail(detail);
+    const guide = FIELD_GUIDE[field] || FIELD_GUIDE.description;
     return `${SHARED_RULES}
 
 ${creativityBlock(creativity)}
 
-Task: build a SillyTavern lorebook / world info file from the user's concept.
+Detail preset: ${preset.label} (${preset.id}). Target length for this field: ${guide.words(preset)}.
 
-Entry rules:
-- 6-14 entries. Cover the load-bearing facts: places, factions, people, rules, objects, history beats.
-- keys must be phrases that would actually appear in chat.
-- content is third person, present or simple past, no second-person "you".
-- constant=true only for 0-2 framing entries that must always be in context.
-- Keep each content block 40-140 words. No novels.
-- Do not repeat the same fact across entries.
+What this field is for:
+${guide.purpose}
 
-User concept:
-${concept}
-${extra ? `\nAdditional direction:\n${extra}` : ''}
+This step:
+${guide.instruction}
+
+Write ONLY this field. Use the stacked context below in this exact order: concept, then every already-built field. Do not rewrite earlier fields.
+
+${buildPromptStack({ concept, extra, critique, draft, sourceCard, mode })}
+
+JSON shape:
+${guide.shape}`;
+}
+
+export function buildLorebookPrompt({ concept, creativity, extra = '', critique = '', detail = 'standard', card = null, sourceCard = '', mode = 'generate' } = {}) {
+    const preset = resolveDetail(detail);
+    return `${SHARED_RULES}
+
+${creativityBlock(creativity)}
+
+What a lorebook / world-info file is for:
+A lorebook is NOT the character card. It is keyed background the chat model only sees when a trigger word appears.
+Use it for load-bearing facts that would bloat the card: places, factions, named people, rules, objects, history beats.
+Each entry must stand alone. Do not recap description/personality/scenario. Do not write second-person "you". Do not write dialogue examples.
+
+How to fill the fields:
+- name: short book title
+- description: one or two sentences about what the book covers
+- comment: short entry title
+- keys: 3-8 phrases that would actually appear in chat and should summon this fact
+- content: ${preset.loreWords} words, third person, present or simple past
+- constant: true only for 0-2 framing entries that must always be in context
+- insertion_order: lower numbers insert earlier. Default 100.
+
+Write ${preset.loreEntries} entries. Do not return an empty entries array. Do not invent a different setting than the finished card.
+
+This lorebook prompt is: CONCEPT + the WHOLE finished character card.
+
+${buildPromptStack({ concept, extra, critique, draft: card || {}, sourceCard, mode })}
+
+WHOLE FINISHED CHARACTER CARD:
+${formatWholeCard(card)}
 
 JSON shape:
 {
@@ -118,81 +233,8 @@ JSON shape:
 }`;
 }
 
-export function buildPersonaPrompt({ concept, creativity, extra = '' }) {
-    return `${SHARED_RULES}
-
-${creativityBlock(creativity)}
-
-Task: build a SillyTavern user PERSONA, not a bot card.
-
-This describes {{user}} for the model. It is worn by the human player.
-- name: the persona's name.
-- description: 80-180 words. How this person looks, sounds, and occupies a scene. Write so a bot can react to them.
-- personality: 60-140 words. How they treat other people, what they want, what they will not do.
-- title: optional short label shown in the persona list.
-
-Do not write a first message. Do not write example messages. Do not write system prompts.
-
-User concept:
-${concept}
-${extra ? `\nAdditional direction:\n${extra}` : ''}
-
-JSON shape:
-{
-  "name": "",
-  "title": "",
-  "description": "",
-  "personality": ""
-}`;
-}
-
-export function buildRemakePrompt({ cardText, creativity, extra = '', critique = '', includeLorebook = true }) {
-    return `${SHARED_RULES}
-
-${creativityBlock(creativity)}
-
-Task: remake the uploaded character card. Keep the soul of the character (name, role, relationships, setting) unless the user asked to change them. Fix slop, split mashed fields, replace cliches with specific detail, and write a card a good model can actually play.
-
-Priority:
-1. User extra direction, if any. Follow it even when it disagrees with the critique.
-2. Analyzer critique. Treat every listed issue as a required fix unless the user overrode it.
-3. Keep the character recognizable.
-
-Also produce a lorebook if the character needs one (setting rules, named people, places, items). If the world is tiny, return an empty lorebook array.
-Keep the JSON compact enough to finish. Prefer 4-8 lore entries over a novel.
-
-Current card:
-${cardText}
-${critique ? `\nAnalyzer critique to apply:\n${critique}` : ''}
-${extra ? `\nAdditional user direction (wins if it conflicts with the critique):\n${extra}` : ''}
-
-JSON shape:
-{
-  "name": "",
-  "description": "",
-  "personality": "",
-  "scenario": "",
-  "first_mes": "",
-  "mes_example": "",
-  "alternate_greetings": [""],
-  "system_prompt": "",
-  "post_history_instructions": "",
-  "creator_notes": "",
-  "tags": [""],
-  "creator": "",
-  "character_version": "1.1",
-  "talkativeness": 0.5,
-  "depth_prompt": "",
-  "lorebook": ${includeLorebook ? `[
-    {
-      "comment": "",
-      "keys": [""],
-      "content": "",
-      "constant": false,
-      "insertion_order": 100
-    }
-  ]` : '[]'}
-}`;
+export function buildPersonaFieldPrompt(options) {
+    return buildFieldPrompt(options);
 }
 
 export function buildAiSlopPrompt(cardText) {
@@ -235,3 +277,5 @@ Give 3-8 issues. Give 2-5 recommendations.
 Card:
 ${cardText}`;
 }
+
+export { resolveDetail };

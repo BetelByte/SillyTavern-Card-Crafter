@@ -1,4 +1,4 @@
-import { DISPLAY_NAME, EXTENSION_NAME, GENERATION_TYPES, TABS, VERSION } from './constants.js';
+import { CHARACTER_FIELD_STEPS, DETAIL_PRESETS, DISPLAY_NAME, EXTENSION_NAME, GENERATION_TYPES, PERSONA_FIELD_STEPS, TABS, VERSION } from './constants.js';
 import {
     abortJob,
     getActiveJob,
@@ -31,6 +31,7 @@ import { getConnectionProfiles, getSettings, updateSetting } from './settings.js
 import { formatAnalysisBrief, normalizeCard } from './slop.js';
 import {
     creativityLabel,
+    detailLabel,
     downloadTextFile,
     escapeHtml,
     readFileAsText,
@@ -59,6 +60,8 @@ const state = {
     lastExtra: '',
     generateIncludeLore: null,
     generateCreativity: null,
+    generateDetail: null,
+    remakeDetail: null,
     popup: null,
     opening: false,
     dock: null,
@@ -333,10 +336,47 @@ function bindJobControls(root) {
 
 function jobStatusLabel(job) {
     if (!job) return '';
-    if (job.status === 'running') return job.fallback ? 'Waiting on the model…' : 'Streaming…';
+    const step = job.step && job.total ? `Step ${job.step}/${job.total}${job.stepLabel ? ` · ${job.stepLabel}` : ''}` : (job.stepLabel || '');
+    if (job.status === 'running') {
+        if (step) return step;
+        return job.fallback ? 'Waiting on the model…' : 'Streaming…';
+    }
     if (job.status === 'done') return 'Done';
     if (job.status === 'stopped') return 'Stopped';
-    return 'Failed';
+    return step ? `Failed · ${step}` : 'Failed';
+}
+
+function pipelineStepsFor(job) {
+    if (!job) return [];
+    if (job.kind === 'analyze') return [{ label: 'Judgement' }];
+    if (job.kind === 'generate' && job.meta?.type === 'lorebook') return [{ label: 'Lorebook' }];
+    if (job.kind === 'generate' && job.meta?.type === 'persona') {
+        return PERSONA_FIELD_STEPS.map((step) => ({ label: step.label }));
+    }
+    const steps = CHARACTER_FIELD_STEPS.map((step) => ({ label: step.label }));
+    if (job.meta?.includeLorebook) steps.push({ label: 'Lorebook' });
+    return steps;
+}
+
+function renderJobSteps(job) {
+    const steps = pipelineStepsFor(job);
+    if (!steps.length) return '';
+    return `
+      <ol class="card-crafter-steps">
+        ${steps.map((step, index) => {
+            const number = index + 1;
+            const current = Number(job.step) || 0;
+            const stateClass = job.status === 'done' || current > number
+                ? 'is-done'
+                : current === number && job.status === 'running'
+                    ? 'is-current'
+                    : current === number && job.status === 'error'
+                        ? 'is-failed'
+                        : '';
+            return `<li class="${stateClass}"><span>${number}</span>${escapeHtml(step.label)}</li>`;
+        }).join('')}
+      </ol>
+    `;
 }
 
 function renderJobPanel(job) {
@@ -351,6 +391,7 @@ function renderJobPanel(job) {
         </div>
         ${job.status === 'running' ? `<button type="button" class="card-crafter-ghost" data-cc-stop="${escapeHtml(job.id)}"><i class="fa-solid fa-stop"></i><span>Stop</span></button>` : ''}
       </header>
+      ${renderJobSteps(job)}
       ${job.error && job.status !== 'running' ? `<p class="card-crafter-job-error">${escapeHtml(job.error)}</p>` : ''}
       ${preview ? `<pre class="card-crafter-stream" data-cc-stream>${escapeHtml(preview)}</pre>` : ''}
     </article>
@@ -413,9 +454,10 @@ function renderGenerate() {
         <span>Creativity <strong id="cc-creativity-label">${state.generateCreativity ?? settings.defaultCreativity} · ${creativityLabel(state.generateCreativity ?? settings.defaultCreativity)}</strong></span>
         <input type="range" id="cc-creativity" min="0" max="100" step="5" value="${state.generateCreativity ?? settings.defaultCreativity}">
       </label>
+      ${renderDetailPicker('cc-detail', state.generateDetail ?? settings.defaultDetail)}
       <label class="card-crafter-check" id="cc-lore-wrap">
         <input type="checkbox" id="cc-include-lore" ${(state.generateIncludeLore ?? settings.autoImportLorebook) ? 'checked' : ''}>
-        <span>Also draft a lorebook if the character needs one</span>
+        <span>Also draft a lorebook after the card</span>
       </label>
       <div class="card-crafter-actions">
         <button type="submit" class="card-crafter-primary" id="cc-generate-btn">
@@ -454,6 +496,24 @@ function renderAnalyze() {
     <div id="cc-analyze-live"></div>
     <div id="cc-analyze-result">${state.analysis ? renderAnalysis(state.analysis, state.uploadedCard) : ''}</div>
   `;
+}
+
+function renderDetailPicker(id, selected, label = 'Detail') {
+    const current = selected || 'standard';
+    return `
+      <div class="card-crafter-field">
+        <span>${escapeHtml(label)} <strong id="${id}-label">${escapeHtml(detailLabel(current))}</strong></span>
+        <div class="card-crafter-type-row card-crafter-detail-row" id="${id}-row">
+          ${DETAIL_PRESETS.map((preset) => `
+            <label class="card-crafter-chip${preset.id === current ? ' is-active' : ''}">
+              <input type="radio" name="${id}" value="${preset.id}" ${preset.id === current ? 'checked' : ''}>
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span>${escapeHtml(preset.hint)}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+    `;
 }
 
 function renderLibraryPicker(id) {
@@ -512,9 +572,10 @@ function renderRemake() {
         <span>Creativity <strong id="cc-remake-creativity-label">${state.remakeCreativity ?? settings.defaultCreativity} · ${creativityLabel(state.remakeCreativity ?? settings.defaultCreativity)}</strong></span>
         <input type="range" id="cc-remake-creativity" min="0" max="100" step="5" value="${state.remakeCreativity ?? settings.defaultCreativity}">
       </label>
+      ${renderDetailPicker('cc-remake-detail', state.remakeDetail ?? settings.defaultDetail)}
       <label class="card-crafter-check">
         <input type="checkbox" id="cc-remake-lore" ${state.remakeIncludeLore ? 'checked' : ''}>
-        <span>Build a lorebook if the remake needs one</span>
+        <span>Build a lorebook after the remake</span>
       </label>
       <div class="card-crafter-actions">
         <button type="button" class="card-crafter-primary" id="cc-remake-btn">
@@ -554,6 +615,7 @@ function renderSettings() {
         <span>Default creativity <strong id="cc-default-creativity-label">${settings.defaultCreativity} · ${creativityLabel(settings.defaultCreativity)}</strong></span>
         <input type="range" id="cc-default-creativity" min="0" max="100" step="5" value="${settings.defaultCreativity}">
       </label>
+      ${renderDetailPicker('cc-default-detail', settings.defaultDetail, 'Default detail')}
       <label class="card-crafter-check">
         <input type="checkbox" id="cc-unlimited-tokens" ${!Number(settings.maxResponseTokens) ? 'checked' : ''}>
         <span>Unlimited response length</span>
@@ -770,6 +832,7 @@ function bindShared(root) {
         const json = buildCharacterCardJson(payload);
         downloadTextFile(`${sanitizeFileName(payload.name)}.json`, JSON.stringify(json, null, 2));
     });
+
     root.querySelector('[data-cc-import-lore]')?.addEventListener('click', async (event) => {
         const btn = event.currentTarget;
         try {
@@ -814,7 +877,7 @@ async function handleCharacterImport(btn, withLore) {
         setBusy(btn, true, 'Importing…');
         let worldName = '';
         if (withLore && payload.lorebook?.length) {
-            worldName = await importLorebookToSillyTavern(payload.lorebook, `${payload.name} Lore`);
+            worldName = await importLorebookToSillyTavern(payload.lorebook, raw?.lorebook_name || `${payload.name} Lore`);
         }
         await importCharacterToSillyTavern(payload, { worldName });
         describeImport('Character', payload.name);
@@ -823,6 +886,22 @@ async function handleCharacterImport(btn, withLore) {
     } finally {
         setBusy(btn, false);
     }
+}
+
+
+function bindDetailPicker(root, name, onChange) {
+    const row = root.querySelector(`#${name}-row`);
+    const label = root.querySelector(`#${name}-label`);
+    root.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
+        input.addEventListener('change', () => {
+            const value = input.value;
+            row?.querySelectorAll('.card-crafter-chip').forEach((chip) => {
+                chip.classList.toggle('is-active', chip.querySelector('input')?.value === value);
+            });
+            if (label) label.textContent = detailLabel(value);
+            onChange?.(value);
+        });
+    });
 }
 
 function bindGenerate(root) {
@@ -842,6 +921,9 @@ function bindGenerate(root) {
     slider?.addEventListener('input', () => {
         state.generateCreativity = Number(slider.value);
         label.textContent = `${slider.value} · ${creativityLabel(slider.value)}`;
+    });
+    bindDetailPicker(root, 'cc-detail', (value) => {
+        state.generateDetail = value;
     });
     root.querySelector('#cc-concept')?.addEventListener('input', (event) => {
         state.lastConcept = event.currentTarget.value;
@@ -863,15 +945,18 @@ function bindGenerate(root) {
         const extra = root.querySelector('#cc-extra').value.trim();
         const creativity = Number(slider.value);
         const includeLorebook = Boolean(root.querySelector('#cc-include-lore')?.checked);
+        const detail = root.querySelector('input[name="cc-detail"]:checked')?.value || getSettings().defaultDetail;
         state.lastConcept = concept;
         state.lastExtra = extra;
         state.generateCreativity = creativity;
         state.generateIncludeLore = includeLorebook;
+        state.generateDetail = detail;
         startGenerateJob({
             type: state.genType,
             concept,
             extra,
             creativity,
+            detail,
             includeLorebook,
         });
         toast('info', 'Generation started. You can switch tabs or keep chatting.');
@@ -956,6 +1041,9 @@ function bindRemake(root) {
         state.remakeCreativity = Number(slider.value);
         label.textContent = `${slider.value} · ${creativityLabel(slider.value)}`;
     });
+    bindDetailPicker(root, 'cc-remake-detail', (value) => {
+        state.remakeDetail = value;
+    });
     root.querySelector('#cc-remake-extra')?.addEventListener('input', (event) => {
         state.remakeExtra = event.currentTarget.value;
     });
@@ -976,14 +1064,17 @@ function bindRemake(root) {
             const extra = root.querySelector('#cc-remake-extra')?.value.trim() || '';
             const includeLorebook = Boolean(root.querySelector('#cc-remake-lore')?.checked);
             const creativity = Number(slider?.value ?? getSettings().defaultCreativity);
+            const detail = root.querySelector('input[name="cc-remake-detail"]:checked')?.value || getSettings().defaultDetail;
             state.remakeExtra = extra;
             state.remakeIncludeLore = includeLorebook;
             state.remakeCreativity = creativity;
+            state.remakeDetail = detail;
             startRemakeJob({
                 card,
                 extra,
                 critique: formatAnalysisBrief(state.analysis),
                 creativity,
+                detail,
                 includeLorebook,
             });
             toast('info', 'Remake started. You can switch tabs or keep chatting.');
@@ -1004,6 +1095,7 @@ function bindSettings(root) {
     creativity?.addEventListener('input', () => {
         creativityLabelEl.textContent = `${creativity.value} · ${creativityLabel(creativity.value)}`;
     });
+    bindDetailPicker(root, 'cc-default-detail');
     const unlimited = root.querySelector('#cc-unlimited-tokens');
     const tokenWrap = root.querySelector('#cc-max-tokens-wrap');
     const tokenInput = root.querySelector('#cc-max-tokens');
@@ -1020,6 +1112,7 @@ function bindSettings(root) {
         updateSetting('creatorName', root.querySelector('#cc-creator').value.trim());
         updateSetting('slopThreshold', Number(threshold.value));
         updateSetting('defaultCreativity', Number(creativity.value));
+        updateSetting('defaultDetail', root.querySelector('input[name="cc-default-detail"]:checked')?.value || 'standard');
         updateSetting('maxResponseTokens', unlimited?.checked ? 0 : (Number(tokenInput?.value) || 3500));
         updateSetting('autoImportLorebook', root.querySelector('#cc-auto-lore').checked);
         toast('success', 'Settings saved.');

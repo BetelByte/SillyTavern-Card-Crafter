@@ -7,7 +7,7 @@ A mobile-first SillyTavern extension that turns a concept into a character card,
 ## What it does
 
 - **Generate** — describe a character, setting, or user persona. Card Crafter asks your current SillyTavern model for a structured V2 card, a world-info book, or a persona.
-- **Lorebook when needed** — character generation can draft keyed world-info entries and import them with the card.
+- **Lorebook when asked** — Generate and Remake run a second pass for world-info after the card. The checkbox means “write one”, not “maybe later”.
 - **Slop-o-meter** — pick a library card or upload a PNG / JSON. Your current SillyTavern model grades it. Higher score = sloppier. It flags cliches, mashed fields, jailbreak leftovers, empty mystery, repetition, and missing pieces.
 - **Remake** — keep the soul of the character, rewrite the slop, optionally build a proper lorebook. Creativity is a slider, not a vibe.
 - **Import or download** — push the result into SillyTavern, or save JSON.
@@ -42,8 +42,11 @@ You need a working model selected in SillyTavern. If you use **Connection Manage
 
 1. Choose Character, Lorebook, or Persona
 2. Describe the concept
-3. Set creativity (0 = faithful, 100 = wild)
-4. Generate, preview, then **Import** or **Download JSON**
+3. Set creativity (0 = faithful, 100 = wild) and detail (Sketch → Masterpiece)
+4. Leave **Also draft a lorebook after the card** on if you want world-info.
+5. Generate, preview, then **Import** or **Download JSON**
+
+Generate and Remake write one field at a time (name → description → personality → …). The original concept stays in every request. The lorebook is still one dedicated pass at the end, with a prompt that explains what world-info is for.
 
 Generation streams live in the panel. You can switch tabs, close Card Crafter, or keep chatting while it runs. A floating dock keeps the stream and a **Stop** button visible.
 
@@ -63,7 +66,16 @@ Analyze is AI-only. It uses tokens and waits on the model. There is no local heu
 
 ### Remake
 
-Select the character from your library (or upload a card), say what to keep or cut, set creativity, and remake. If you already ran Analyze, that critique is applied automatically. Use **Extra changes** for anything else you want rewritten; your notes win if they conflict with the judge. Import the new character and lorebook when you like it.
+Select the character from your library (or upload a card), say what to keep or cut, set creativity and detail, and remake. If you already ran Analyze, that critique is applied automatically. Use **Extra changes** for anything else you want rewritten; your notes win if they conflict with the judge. Leave the lorebook checkbox on to run a dedicated lore pass after the field-by-field rewrite. Import the new character and lorebook when you like it.
+
+### Detail
+
+| Preset | What you get |
+| --- | --- |
+| Sketch | Short fields, tiny lorebook, cheap |
+| Standard | Normal playable card |
+| Rich | Longer fields and a denser lorebook |
+| Masterpiece | Dense card and a large lorebook |
 
 ## Settings
 
@@ -71,6 +83,7 @@ Select the character from your library (or upload a card), say what to keep or c
 - Creator name stamped on new cards
 - Slop threshold (default 55)
 - Default creativity
+- Default detail (Sketch / Standard / Rich / Masterpiece)
 - Max response tokens, or Unlimited (default)
 - Auto-draft lorebook with characters
 - Error logs written to `SillyTavern/data/<user>/user/files/` as `ERROR_LOG_<n>_<DD-MM-YYYY>_<HH-MM-SS>.txt`

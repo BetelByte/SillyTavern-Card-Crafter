@@ -89,6 +89,9 @@ function createJob({ kind, label, meta = {} }) {
         reasoning: '',
         streaming: true,
         fallback: false,
+        step: 0,
+        total: 0,
+        stepLabel: '',
         result: null,
         error: '',
         startedAt: Date.now(),
@@ -116,12 +119,15 @@ function finishJob(job, { status, result = null, error = '' } = {}) {
 }
 
 function attachStream(job) {
-    return ({ text = '', reasoning = '', streaming = true, fallback = false } = {}) => {
+    return ({ text = '', reasoning = '', streaming = true, fallback = false, step, total, label } = {}) => {
         if (job.status !== 'running') return;
         job.text = String(text || '');
         job.reasoning = String(reasoning || '');
         job.streaming = Boolean(streaming);
         if (fallback) job.fallback = true;
+        if (step) job.step = Number(step) || job.step;
+        if (total) job.total = Number(total) || job.total;
+        if (label) job.stepLabel = String(label);
         emit(job);
     };
 }
@@ -149,11 +155,11 @@ async function runJob(job, worker) {
     }
 }
 
-export function startGenerateJob({ type = 'character', concept, extra = '', creativity, includeLorebook = false } = {}) {
+export function startGenerateJob({ type = 'character', concept, extra = '', creativity, detail = 'standard', includeLorebook = false } = {}) {
     const job = createJob({
         kind: 'generate',
         label: type === 'lorebook' ? 'Drafting lorebook' : type === 'persona' ? 'Drafting persona' : 'Drafting character',
-        meta: { type, concept, extra, creativity, includeLorebook },
+        meta: { type, concept, extra, creativity, detail, includeLorebook },
     });
 
     runJob(job, async (current) => {
@@ -161,6 +167,7 @@ export function startGenerateJob({ type = 'character', concept, extra = '', crea
             concept,
             extra,
             creativity,
+            detail,
             includeLorebook,
             signal: current.controller.signal,
             onChunk: attachStream(current),
@@ -173,11 +180,11 @@ export function startGenerateJob({ type = 'character', concept, extra = '', crea
     return job;
 }
 
-export function startRemakeJob({ card, extra = '', critique = '', creativity, includeLorebook = true } = {}) {
+export function startRemakeJob({ card, extra = '', critique = '', creativity, detail = 'standard', includeLorebook = true } = {}) {
     const job = createJob({
         kind: 'remake',
         label: `Remaking ${card?.name || 'card'}`,
-        meta: { extra, critique, creativity, includeLorebook, name: card?.name || '' },
+        meta: { extra, critique, creativity, detail, includeLorebook, name: card?.name || '' },
     });
 
     runJob(job, async (current) => remakeCharacter({
@@ -185,7 +192,12 @@ export function startRemakeJob({ card, extra = '', critique = '', creativity, in
         extra,
         critique,
         creativity,
+        detail,
         includeLorebook,
+        concept: [
+            card?.name ? `Character: ${card.name}` : '',
+            extra || '',
+        ].filter(Boolean).join('\n') || card?.name || '',
         signal: current.controller.signal,
         onChunk: attachStream(current),
     }));

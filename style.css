@@ -203,6 +203,57 @@
     gap: 8px;
 }
 
+.card-crafter-detail-row {
+    grid-template-columns: 1fr 1fr;
+}
+
+.card-crafter-steps {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+}
+
+.card-crafter-steps li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 10px 0 4px;
+    border-radius: 999px;
+    border: 1px solid var(--cc-line);
+    color: var(--cc-muted);
+    font-size: 0.75rem;
+}
+
+.card-crafter-steps li span {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--cc-ink) 10%, transparent);
+    font-size: 0.68rem;
+}
+
+.card-crafter-steps li.is-current {
+    color: var(--cc-ink);
+    border-color: color-mix(in srgb, var(--cc-accent) 55%, transparent);
+    background: color-mix(in srgb, var(--cc-accent) 14%, transparent);
+}
+
+.card-crafter-steps li.is-done {
+    color: var(--cc-ok);
+    border-color: color-mix(in srgb, var(--cc-ok) 40%, transparent);
+}
+
+.card-crafter-steps li.is-failed {
+    color: var(--cc-danger);
+    border-color: color-mix(in srgb, var(--cc-danger) 45%, transparent);
+}
+
 .card-crafter-chip {
     display: flex;
     flex-direction: column;
@@ -615,6 +666,10 @@
 
     .card-crafter-type-row {
         grid-template-columns: repeat(3, 1fr);
+    }
+
+    .card-crafter-detail-row {
+        grid-template-columns: repeat(4, 1fr);
     }
 
     .card-crafter-tab {

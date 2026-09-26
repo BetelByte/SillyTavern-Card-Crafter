@@ -273,12 +273,26 @@ export function nowStamp() {
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
+export function detailLabel(id) {
+    if (id === 'sketch') return 'Sketch';
+    if (id === 'rich') return 'Rich';
+    if (id === 'masterpiece') return 'Masterpiece';
+    return 'Standard';
+}
+
+export function creativityToTemperature(level) {
+    const n = Number(level);
+    const value = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 45;
+    return Math.round((0.2 + (value / 100) * 1.1) * 100) / 100;
+}
+
 export function creativityLabel(value) {
-    if (value <= 20) return 'Strict / faithful';
-    if (value <= 40) return 'Grounded';
-    if (value <= 60) return 'Balanced';
-    if (value <= 80) return 'Inventive';
-    return 'Wild';
+    const temp = creativityToTemperature(value);
+    if (value <= 20) return `Strict / faithful · temp ${temp}`;
+    if (value <= 40) return `Grounded · temp ${temp}`;
+    if (value <= 60) return `Balanced · temp ${temp}`;
+    if (value <= 80) return `Inventive · temp ${temp}`;
+    return `Wild · temp ${temp}`;
 }
 
 export function slopBand(score) {
